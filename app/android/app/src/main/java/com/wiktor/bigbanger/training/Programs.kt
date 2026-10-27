@@ -1,10 +1,12 @@
 package com.wiktor.bigbanger.training
 
 /**
- * The 4 built-in programs. Max Hangs and Max Testing follow Lattice
- * Training's published testing/training instructions. Warm Up and No Hangs
- * have no single authoritative source (see each program's [ProgramDefinition.description])
- * -- they're reasonable, easy-to-tweak defaults, not verified protocols.
+ * The 4 built-in programs. Max Hangs (85% of max, 10s x 6, 2 min rest) and
+ * Max Testing (7s holds, progressive load, 2 min rest, up to 8 attempts)
+ * follow Lattice Training's published testing/training instructions.
+ * Warm Up's ramp has no single authoritative source. No Hangs' structure
+ * (10 sets over ~10 min) follows Lattice's published Abrahangs protocol;
+ * its ~70%-of-max intensity specifically is still an approximation.
  */
 object Programs {
     private const val DEFAULT_TOLERANCE = 0.05f
@@ -12,8 +14,6 @@ object Programs {
     val MAX_HANGS = ProgramDefinition(
         id = ProgramId.MAX_HANGS,
         title = "Max Hangs",
-        description = "Lattice Training: 6 x 10s holds at 85% of max, 2 min rest between.",
-        isApproximate = false,
         hasNoTarget = false,
         steps = buildList {
             repeat(6) { i ->
@@ -34,8 +34,6 @@ object Programs {
     val MAX_TESTING = ProgramDefinition(
         id = ProgramId.MAX_TESTING,
         title = "Max Testing",
-        description = "Find your current max: up to 8 attempts, 7s holds, progressively heavier, 2 min rest.",
-        isApproximate = false,
         hasNoTarget = true,
         steps = buildList {
             repeat(8) { i ->
@@ -48,8 +46,6 @@ object Programs {
     val WARM_UP = ProgramDefinition(
         id = ProgramId.WARM_UP,
         title = "Warm Up",
-        description = "Approximate ramp: 50/60/70/80/90% of max, 8s holds, 60s rest. Adjust by feel.",
-        isApproximate = true,
         hasNoTarget = false,
         steps = buildList {
             val percents = listOf(0.50f, 0.60f, 0.70f, 0.80f, 0.90f)
@@ -71,9 +67,6 @@ object Programs {
     val NO_HANGS = ProgramDefinition(
         id = ProgramId.NO_HANGS,
         title = "No Hangs",
-        description = "Lattice's published Abrahangs protocol: 10 sets over ~10 min, feet never leave the " +
-            "ground, low intensity (~70% of max -- that figure specifically is still approximate).",
-        isApproximate = true,
         hasNoTarget = false,
         steps = buildList {
             repeat(10) { i ->

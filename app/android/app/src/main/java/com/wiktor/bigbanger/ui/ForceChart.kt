@@ -6,9 +6,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import com.wiktor.bigbanger.ble.WeightSample
 
@@ -23,11 +28,15 @@ fun ForceChart(
     windowSeconds: Float = DEFAULT_WINDOW_SECONDS,
     modifier: Modifier = Modifier,
 ) {
+    val panelColor = MaterialTheme.colorScheme.surfaceVariant
     val lineColor = MaterialTheme.colorScheme.primary
-    val gridColor = MaterialTheme.colorScheme.outlineVariant
-    val bandColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+    val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
+    val bandFillColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
+    val bandEdgeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
 
     Canvas(modifier = modifier.fillMaxWidth().height(220.dp)) {
+        drawRoundRect(color = panelColor, cornerRadius = CornerRadius(20f, 20f))
+
         val latestTime = samples.lastOrNull()?.timestampSeconds ?: 0f
         val windowStart = (latestTime - windowSeconds).coerceAtLeast(0f)
         val visible = samples.filter { it.timestampSeconds >= windowStart }
@@ -48,7 +57,7 @@ fun ForceChart(
         val gridLines = 4
         for (i in 0..gridLines) {
             val y = size.height * i / gridLines
-            drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+            drawLine(gridColor, Offset(24f, y), Offset(size.width - 24f, y), strokeWidth = 1.5f)
         }
         if (minWeight < 0f && maxWeight > 0f) {
             val zeroY = yOf(0f)
@@ -58,21 +67,43 @@ fun ForceChart(
         targetRangeKg?.let { range ->
             val top = yOf(range.endInclusive)
             val bottom = yOf(range.start)
-            drawRect(color = bandColor, topLeft = Offset(0f, top), size = Size(size.width, bottom - top))
+            drawRect(color = bandFillColor, topLeft = Offset(0f, top), size = Size(size.width, bottom - top))
+            drawLine(bandEdgeColor, Offset(0f, top), Offset(size.width, top), strokeWidth = 2f)
+            drawLine(bandEdgeColor, Offset(0f, bottom), Offset(size.width, bottom), strokeWidth = 2f)
         }
 
         if (visible.size >= 2) {
-            var previous = visible.first()
-            for (sample in visible.drop(1)) {
-                drawLine(
-                    color = lineColor,
-                    start = Offset(xOf(previous.timestampSeconds), yOf(previous.kilograms)),
-                    end = Offset(xOf(sample.timestampSeconds), yOf(sample.kilograms)),
-                    strokeWidth = 4f,
-                    cap = StrokeCap.Round,
-                )
-                previous = sample
+            val linePath = Path()
+            val fillPath = Path()
+            var started = false
+            for (sample in visible) {
+                val x = xOf(sample.timestampSeconds)
+                val y = yOf(sample.kilograms)
+                if (!started) {
+                    linePath.moveTo(x, y)
+                    fillPath.moveTo(x, size.height)
+                    fillPath.lineTo(x, y)
+                    started = true
+                } else {
+                    linePath.lineTo(x, y)
+                    fillPath.lineTo(x, y)
+                }
             }
+            fillPath.lineTo(xOf(visible.last().timestampSeconds), size.height)
+            fillPath.close()
+
+            drawPath(
+                path = fillPath,
+                brush = Brush.verticalGradient(listOf(lineColor.copy(alpha = 0.35f), lineColor.copy(alpha = 0f))),
+            )
+            drawPath(
+                path = linePath,
+                color = lineColor,
+                style = Stroke(width = 5f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+
+            val last = visible.last()
+            drawCircle(color = lineColor, radius = 7f, center = Offset(xOf(last.timestampSeconds), yOf(last.kilograms)))
         }
     }
 }

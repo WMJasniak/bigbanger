@@ -4,9 +4,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +27,26 @@ import kotlinx.coroutines.launch
 
 private const val CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000L // twice a day at most
 
+// A deliberate dark palette -- overriding only `primary` on the Material3 baseline
+// left every other token at its default blue-violet tuning, which clashed with the
+// orange accent and read as washed out/low-contrast throughout the app.
+private val BigBangerColorScheme = darkColorScheme(
+    primary = Color(0xFFE1551F),
+    onPrimary = Color(0xFFFFFAF6),
+    primaryContainer = Color(0xFF5A2512),
+    onPrimaryContainer = Color(0xFFFFD9C7),
+    secondary = Color(0xFFC9A227),
+    onSecondary = Color(0xFF2B2100),
+    background = Color(0xFF141312),
+    onBackground = Color(0xFFF4EFE8),
+    surface = Color(0xFF141312),
+    onSurface = Color(0xFFF4EFE8),
+    surfaceVariant = Color(0xFF231F1C),
+    onSurfaceVariant = Color(0xFFB8AFA6),
+    outline = Color(0xFF8A8178),
+    outlineVariant = Color(0xFF3A3531),
+)
+
 class MainActivity : ComponentActivity() {
     private val updater by lazy { Updater(applicationContext) }
     private val updateSettings by lazy { UpdateSettings(applicationContext) }
@@ -33,8 +54,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFFD84315))) {
-                Surface(modifier = Modifier.fillMaxSize()) {
+            MaterialTheme(colorScheme = BigBangerColorScheme) {
+                Surface(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
                     val viewModel: BigBangerViewModel = viewModel()
                     var availableRelease by remember { mutableStateOf<ReleaseInfo?>(null) }
                     var updatePhase by remember { mutableStateOf<UpdatePhase>(UpdatePhase.Idle) }

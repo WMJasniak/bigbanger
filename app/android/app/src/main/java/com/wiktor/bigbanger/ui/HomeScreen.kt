@@ -56,7 +56,7 @@ fun HomeScreen(
             OutlinedButton(onClick = onSettings, modifier = Modifier.weight(1f)) { Text("Settings") }
         }
         TextButton(onClick = onFreeMeasure, modifier = Modifier.fillMaxWidth()) {
-            Text("Free measure (no program)")
+            Text("Raw data")
         }
     }
 }
@@ -69,16 +69,7 @@ private fun ProgramCard(program: ProgramDefinition, onClick: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                Text(program.title, style = MaterialTheme.typography.titleMedium)
-                if (program.isApproximate) {
-                    Text(
-                        "  approximate",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                }
-            }
+            Text(program.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             Text(">", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

@@ -20,8 +20,6 @@ enum class ProgramId { MAX_HANGS, MAX_TESTING, WARM_UP, NO_HANGS }
 data class ProgramDefinition(
     val id: ProgramId,
     val title: String,
-    val description: String,
-    val isApproximate: Boolean,
     val hasNoTarget: Boolean,
     val steps: List<ProgramStep>,
 )
