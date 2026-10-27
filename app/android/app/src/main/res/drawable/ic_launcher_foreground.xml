@@ -4,9 +4,26 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Weight-plate ring mark: outer disk minus inner hole, evenOdd. -->
+    <!-- Carabiner body: a closed oval ring (two antipodal semicircle arcs,
+         the same safe construction used for the previous weight-plate icon). -->
+    <path
+        android:strokeColor="#E1551F"
+        android:strokeWidth="10"
+        android:fillColor="#00000000"
+        android:pathData="M54,27 A18,27 0 1,1 54,81 A18,27 0 1,1 54,27 Z" />
+    <!-- Gate opening: erases a segment of the ring's right side (filled with the
+         background color, matching ic_launcher_background.xml exactly). -->
+    <path
+        android:fillColor="#1D1B19"
+        android:pathData="M64,38 h22 v36 h-22 z" />
+    <!-- Gate bar bridging the opening, plus its hinge rivet. -->
+    <path
+        android:strokeColor="#E1551F"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M68,42 L82,70" />
     <path
         android:fillColor="#E1551F"
-        android:fillType="evenOdd"
-        android:pathData="M54,24 A30,30 0 1,1 54,84 A30,30 0 1,1 54,24 Z M54,40 A14,14 0 1,1 54,68 A14,14 0 1,1 54,40 Z" />
+        android:pathData="M82,70 m-4.2,0 a4.2,4.2 0 1,0 8.4,0 a4.2,4.2 0 1,0 -8.4,0" />
 </vector>
