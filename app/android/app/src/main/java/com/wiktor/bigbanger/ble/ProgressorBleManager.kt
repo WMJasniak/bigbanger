@@ -32,7 +32,7 @@ private const val MAX_HISTORY_SAMPLES = 1500
  * the caller is responsible for checking runtime Bluetooth permissions first.
  */
 @SuppressLint("MissingPermission")
-class ProgressorBleManager(context: Context) {
+class ProgressorBleManager(context: Context) : ScaleSource {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(Dispatchers.Main.immediate + Job())
 
@@ -42,24 +42,26 @@ class ProgressorBleManager(context: Context) {
     private var gatt: BluetoothGatt? = null
     private var controlCharacteristic: BluetoothGattCharacteristic? = null
     private var scanTimeoutJob: Job? = null
+    private var lastDevice: BleDevice? = null
+    private var intentionalDisconnect = false
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
-    val connectionState = _connectionState.asStateFlow()
+    override val connectionState = _connectionState.asStateFlow()
 
     private val _scanResults = MutableStateFlow<List<BleDevice>>(emptyList())
-    val scanResults = _scanResults.asStateFlow()
+    override val scanResults = _scanResults.asStateFlow()
 
     private val _isScanning = MutableStateFlow(false)
-    val isScanning = _isScanning.asStateFlow()
+    override val isScanning = _isScanning.asStateFlow()
 
     private val _isMeasuring = MutableStateFlow(false)
-    val isMeasuring = _isMeasuring.asStateFlow()
+    override val isMeasuring = _isMeasuring.asStateFlow()
 
     private val _latestWeightKg = MutableStateFlow<Float?>(null)
-    val latestWeightKg = _latestWeightKg.asStateFlow()
+    override val latestWeightKg = _latestWeightKg.asStateFlow()
 
     private val _weightHistory = MutableStateFlow<List<WeightSample>>(emptyList())
-    val weightHistory = _weightHistory.asStateFlow()
+    override val weightHistory = _weightHistory.asStateFlow()
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -81,7 +83,7 @@ class ProgressorBleManager(context: Context) {
         }
     }
 
-    private val gattCallback = object : BluetoothGattCallback() {
+    private val gattCallback: BluetoothGattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(bluetoothGatt: BluetoothGatt, status: Int, newState: Int) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> bluetoothGatt.discoverServices()
@@ -90,13 +92,29 @@ class ProgressorBleManager(context: Context) {
                     gatt = null
                     controlCharacteristic = null
                     _isMeasuring.value = false
-                    _connectionState.value = ConnectionState.Disconnected
+                    val device: BleDevice? = lastDevice
+                    val underlyingDevice: BluetoothDevice? = device?.device
+                    if (intentionalDisconnect || device == null || underlyingDevice == null) {
+                        _connectionState.value = ConnectionState.Disconnected
+                    } else {
+                        // Unexpected drop (e.g. the scale was switched off): keep trying to
+                        // reconnect to the same device in the background rather than giving
+                        // up, so an in-progress training program can resume instead of
+                        // being cancelled. autoConnect=true asks the OS to complete the
+                        // connection whenever the device becomes available again.
+                        _connectionState.value = ConnectionState.Reconnecting(device)
+                        gatt = underlyingDevice.connectGatt(appContext, true, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                    }
                 }
             }
         }
 
         override fun onServicesDiscovered(bluetoothGatt: BluetoothGatt, status: Int) {
-            val device = (_connectionState.value as? ConnectionState.Connecting)?.device ?: return
+            val device = when (val state = _connectionState.value) {
+                is ConnectionState.Connecting -> state.device
+                is ConnectionState.Reconnecting -> state.device
+                else -> return
+            }
             val service = bluetoothGatt.getService(ProgressorProtocol.SERVICE_UUID)
             val data = service?.getCharacteristic(ProgressorProtocol.DATA_CHARACTERISTIC_UUID)
             val control = service?.getCharacteristic(ProgressorProtocol.CONTROL_CHARACTERISTIC_UUID)
@@ -134,7 +152,7 @@ class ProgressorBleManager(context: Context) {
         }
     }
 
-    fun startScan() {
+    override fun startScan() {
         val scanner = adapter?.bluetoothLeScanner ?: return
         _scanResults.value = emptyList()
         _isScanning.value = true
@@ -149,40 +167,53 @@ class ProgressorBleManager(context: Context) {
         }
     }
 
-    fun stopScan() {
+    override fun stopScan() {
         scanTimeoutJob?.cancel()
         if (!_isScanning.value) return
         adapter?.bluetoothLeScanner?.stopScan(scanCallback)
         _isScanning.value = false
     }
 
-    fun connect(device: BleDevice) {
+    override fun connect(device: BleDevice) {
         stopScan()
+        intentionalDisconnect = false
+        lastDevice = device
         _connectionState.value = ConnectionState.Connecting(device)
-        gatt = device.device.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        gatt = device.device?.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
 
-    fun disconnect() {
-        gatt?.disconnect()
+    override fun disconnect() {
+        intentionalDisconnect = true
+        if (_connectionState.value is ConnectionState.Reconnecting) {
+            // A background autoConnect attempt has no live link to close normally.
+            gatt?.close()
+            gatt = null
+            _connectionState.value = ConnectionState.Disconnected
+        } else {
+            gatt?.disconnect()
+        }
     }
 
-    fun tare() = writeControlOpcode(ProgressorProtocol.ControlOpcode.TARE)
+    override fun tare() {
+        writeControlOpcode(ProgressorProtocol.ControlOpcode.TARE)
+    }
 
-    fun startMeasurement() {
+    override fun startMeasurement() {
         if (writeControlOpcode(ProgressorProtocol.ControlOpcode.START_MEASUREMENT)) {
             _weightHistory.value = emptyList()
             _isMeasuring.value = true
         }
     }
 
-    fun stopMeasurement() {
+    override fun stopMeasurement() {
         if (writeControlOpcode(ProgressorProtocol.ControlOpcode.STOP_MEASUREMENT)) {
             _isMeasuring.value = false
         }
     }
 
-    fun shutdown() {
+    override fun shutdown() {
         stopScan()
+        intentionalDisconnect = true
         gatt?.close()
         gatt = null
         scope.coroutineContext[Job]?.cancel()

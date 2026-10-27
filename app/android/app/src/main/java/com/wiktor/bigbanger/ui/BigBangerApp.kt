@@ -8,6 +8,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,10 +60,55 @@ fun BigBangerApp(viewModel: BigBangerViewModel) {
         return
     }
 
-    val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
-    when (val state = connectionState) {
-        is ConnectionState.Connected -> DeviceScreen(viewModel = viewModel, device = state.device)
-        is ConnectionState.Connecting -> DeviceScreen(viewModel = viewModel, device = state.device)
-        ConnectionState.Disconnected -> ScanScreen(viewModel = viewModel)
+    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+
+    when (val s = screen) {
+        Screen.Home -> HomeScreen(
+            viewModel = viewModel,
+            onSelectProgram = { program ->
+                screen = if (viewModel.connectionState.value is ConnectionState.Connected) {
+                    Screen.GripTypeSelect(program)
+                } else {
+                    Screen.Connect(program)
+                }
+            },
+            onFreeMeasure = { screen = Screen.Connect(null) },
+            onStats = { screen = Screen.Stats },
+            onSettings = { screen = Screen.Settings },
+        )
+
+        is Screen.Connect -> {
+            val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
+            when (val cs = connectionState) {
+                is ConnectionState.Connected -> {
+                    val pending = s.pendingProgram
+                    if (pending != null) {
+                        LaunchedEffect(pending) { screen = Screen.GripTypeSelect(pending) }
+                    } else {
+                        DeviceScreen(viewModel = viewModel, device = cs.device)
+                    }
+                }
+                is ConnectionState.Connecting -> DeviceScreen(viewModel = viewModel, device = cs.device)
+                is ConnectionState.Reconnecting -> DeviceScreen(viewModel = viewModel, device = cs.device)
+                ConnectionState.Disconnected -> ScanScreen(viewModel = viewModel, onBack = { screen = Screen.Home })
+            }
+        }
+
+        is Screen.GripTypeSelect -> GripTypeSelectScreen(
+            viewModel = viewModel,
+            program = s.program,
+            onBack = { screen = Screen.Home },
+            onSelect = { grip -> screen = Screen.Running(s.program, grip) },
+        )
+
+        is Screen.Running -> ProgramRunnerScreen(
+            viewModel = viewModel,
+            program = s.program,
+            gripType = s.gripType,
+            onFinished = { screen = Screen.Home },
+        )
+
+        Screen.Stats -> StatsScreen(viewModel = viewModel, onBack = { screen = Screen.Home })
+        Screen.Settings -> SettingsScreen(viewModel = viewModel, onBack = { screen = Screen.Home })
     }
 }

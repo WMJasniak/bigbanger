@@ -42,7 +42,11 @@ fun DeviceScreen(viewModel: BigBangerViewModel, device: BleDevice) {
             Column {
                 Text(device.name, style = MaterialTheme.typography.titleLarge)
                 Text(
-                    if (isConnected) "Connected" else "Connecting…",
+                    when (connectionState) {
+                        is ConnectionState.Connected -> "Connected"
+                        is ConnectionState.Reconnecting -> "Reconnecting…"
+                        else -> "Connecting…"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

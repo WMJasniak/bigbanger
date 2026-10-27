@@ -13,6 +13,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -23,7 +24,7 @@ import com.wiktor.bigbanger.BigBangerViewModel
 import com.wiktor.bigbanger.ble.BleDevice
 
 @Composable
-fun ScanScreen(viewModel: BigBangerViewModel) {
+fun ScanScreen(viewModel: BigBangerViewModel, onBack: (() -> Unit)? = null) {
     val devices by viewModel.scanResults.collectAsStateWithLifecycle()
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val sorted = devices.sortedByDescending { it.rssi }
@@ -34,6 +35,7 @@ fun ScanScreen(viewModel: BigBangerViewModel) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            onBack?.let { back -> TextButton(onClick = back) { Text("Cancel") } }
             Text("Nearby scales", style = MaterialTheme.typography.titleLarge)
             Button(onClick = { if (isScanning) viewModel.stopScan() else viewModel.startScan() }) {
                 Text(if (isScanning) "Stop" else "Scan")
@@ -57,10 +59,14 @@ fun ScanScreen(viewModel: BigBangerViewModel) {
             )
         }
 
-        LazyColumn {
+        LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
             items(sorted, key = { it.address }) { device ->
                 DeviceRow(device = device, onClick = { viewModel.connect(device) })
             }
+        }
+
+        TextButton(onClick = { viewModel.connectSimulated() }, modifier = Modifier.fillMaxWidth()) {
+            Text("No scale on hand? Use a simulated scale")
         }
     }
 }
