@@ -27,6 +27,9 @@ This is not the first open-source Tindeq Progressor-like project. The [hangman](
 
 * **hardware**: contains the Kicad project for the PCB
 
+* **app**:
+  * *android* contains a companion Android app (Kotlin + Jetpack Compose) that scans for and connects to a BigBanger scale over the Progressor BLE protocol
+
 ## Prerequisite
 
 ### Micropython
