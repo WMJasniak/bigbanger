@@ -166,10 +166,9 @@ fun ProgramRunnerScreen(
 private fun ReadyGate(program: ProgramDefinition, onTare: () -> Unit, onStart: () -> Unit, onCancel: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         TextButton(onClick = onCancel) { Text("Back") }
-        Text(program.title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 8.dp))
         Text(
-            program.description,
-            style = MaterialTheme.typography.bodyMedium,
+            program.title,
+            style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(top = 8.dp, bottom = 32.dp),
         )
         Text(

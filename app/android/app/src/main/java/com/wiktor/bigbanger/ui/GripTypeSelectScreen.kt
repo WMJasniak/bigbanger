@@ -1,5 +1,6 @@
 package com.wiktor.bigbanger.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,8 @@ fun GripTypeSelectScreen(
     onBack: () -> Unit,
     onSelect: (GripType) -> Unit,
 ) {
+    BackHandler(onBack = onBack)
+
     val gripTypes by viewModel.trainingRepo.gripTypes.collectAsStateWithLifecycle()
     var newName by remember { mutableStateOf("") }
 

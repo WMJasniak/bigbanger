@@ -32,7 +32,7 @@ private fun hasBlePermissions(context: android.content.Context): Boolean =
     }
 
 @Composable
-fun BigBangerApp(viewModel: BigBangerViewModel) {
+fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUpdates: () -> Unit) {
     val context = LocalContext.current
     var permissionsGranted by remember { mutableStateOf(hasBlePermissions(context)) }
 
@@ -85,11 +85,13 @@ fun BigBangerApp(viewModel: BigBangerViewModel) {
                     if (pending != null) {
                         LaunchedEffect(pending) { screen = Screen.GripTypeSelect(pending) }
                     } else {
-                        DeviceScreen(viewModel = viewModel, device = cs.device)
+                        DeviceScreen(viewModel = viewModel, device = cs.device, onBack = { screen = Screen.Home })
                     }
                 }
-                is ConnectionState.Connecting -> DeviceScreen(viewModel = viewModel, device = cs.device)
-                is ConnectionState.Reconnecting -> DeviceScreen(viewModel = viewModel, device = cs.device)
+                is ConnectionState.Connecting ->
+                    DeviceScreen(viewModel = viewModel, device = cs.device, onBack = { screen = Screen.Home })
+                is ConnectionState.Reconnecting ->
+                    DeviceScreen(viewModel = viewModel, device = cs.device, onBack = { screen = Screen.Home })
                 ConnectionState.Disconnected -> ScanScreen(viewModel = viewModel, onBack = { screen = Screen.Home })
             }
         }
@@ -109,6 +111,11 @@ fun BigBangerApp(viewModel: BigBangerViewModel) {
         )
 
         Screen.Stats -> StatsScreen(viewModel = viewModel, onBack = { screen = Screen.Home })
-        Screen.Settings -> SettingsScreen(viewModel = viewModel, onBack = { screen = Screen.Home })
+        Screen.Settings -> SettingsScreen(
+            viewModel = viewModel,
+            updateStatus = updateStatus,
+            onCheckUpdates = onCheckUpdates,
+            onBack = { screen = Screen.Home },
+        )
     }
 }

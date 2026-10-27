@@ -1,5 +1,6 @@
 package com.wiktor.bigbanger.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,6 +28,8 @@ private val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
 
 @Composable
 fun StatsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
+
     val gripTypes by viewModel.trainingRepo.gripTypes.collectAsStateWithLifecycle()
     val sessions by viewModel.trainingRepo.sessions.collectAsStateWithLifecycle()
 

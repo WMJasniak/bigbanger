@@ -12,10 +12,15 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.dp
 import com.wiktor.bigbanger.ble.WeightSample
 
+/** Fixed scrolling window, not "stretch to fit all data so far" -- the latter made the
+ * whole trace visibly compress on every new sample, which read as choppy/jittery. */
+private const val DEFAULT_WINDOW_SECONDS = 12f
+
 @Composable
 fun ForceChart(
     samples: List<WeightSample>,
     targetRangeKg: ClosedFloatingPointRange<Float>? = null,
+    windowSeconds: Float = DEFAULT_WINDOW_SECONDS,
     modifier: Modifier = Modifier,
 ) {
     val lineColor = MaterialTheme.colorScheme.primary
@@ -23,8 +28,12 @@ fun ForceChart(
     val bandColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
 
     Canvas(modifier = modifier.fillMaxWidth().height(220.dp)) {
-        val sampleMin = samples.minOfOrNull { it.kilograms }
-        val sampleMax = samples.maxOfOrNull { it.kilograms }
+        val latestTime = samples.lastOrNull()?.timestampSeconds ?: 0f
+        val windowStart = (latestTime - windowSeconds).coerceAtLeast(0f)
+        val visible = samples.filter { it.timestampSeconds >= windowStart }
+
+        val sampleMin = visible.minOfOrNull { it.kilograms }
+        val sampleMax = visible.maxOfOrNull { it.kilograms }
         val minWeight = minOf(0f, sampleMin ?: 0f, targetRangeKg?.start ?: 0f)
         val maxWeight = maxOf(
             minWeight + 1f,
@@ -33,6 +42,7 @@ fun ForceChart(
         )
 
         fun yOf(kg: Float) = size.height - (kg - minWeight) / (maxWeight - minWeight) * size.height
+        fun xOf(t: Float) = ((t - windowStart) / windowSeconds * size.width).coerceIn(0f, size.width)
 
         // Horizontal gridlines, including the zero line.
         val gridLines = 4
@@ -51,17 +61,13 @@ fun ForceChart(
             drawRect(color = bandColor, topLeft = Offset(0f, top), size = Size(size.width, bottom - top))
         }
 
-        if (samples.size >= 2) {
-            val startTime = samples.first().timestampSeconds
-            val duration = (samples.last().timestampSeconds - startTime).coerceAtLeast(0.001f)
-            fun xOf(sample: WeightSample) = (sample.timestampSeconds - startTime) / duration * size.width
-
-            var previous = samples.first()
-            for (sample in samples.drop(1)) {
+        if (visible.size >= 2) {
+            var previous = visible.first()
+            for (sample in visible.drop(1)) {
                 drawLine(
                     color = lineColor,
-                    start = Offset(xOf(previous), yOf(previous.kilograms)),
-                    end = Offset(xOf(sample), yOf(sample.kilograms)),
+                    start = Offset(xOf(previous.timestampSeconds), yOf(previous.kilograms)),
+                    end = Offset(xOf(sample.timestampSeconds), yOf(sample.kilograms)),
                     strokeWidth = 4f,
                     cap = StrokeCap.Round,
                 )

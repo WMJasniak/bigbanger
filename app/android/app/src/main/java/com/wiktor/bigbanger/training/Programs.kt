@@ -71,28 +71,25 @@ object Programs {
     val NO_HANGS = ProgramDefinition(
         id = ProgramId.NO_HANGS,
         title = "No Hangs",
-        description = "Approximate Emil Abrahamsson protocol (simplified to one grip per session): " +
-            "~70% of max, 10s hold, 50s rest, 2 reps/set x 6 sets, 30s between sets. Sources disagree on exact numbers.",
+        description = "Lattice's published Abrahangs protocol: 10 sets over ~10 min, feet never leave the " +
+            "ground, low intensity (~70% of max -- that figure specifically is still approximate).",
         isApproximate = true,
         hasNoTarget = false,
         steps = buildList {
-            repeat(6) { set ->
-                repeat(2) { rep ->
-                    add(
-                        ProgramStep(
-                            kind = StepKind.WORK,
-                            durationSeconds = 10,
-                            percentOfMax = 0.70f,
-                            toleranceBandPoints = DEFAULT_TOLERANCE,
-                            label = "Set ${set + 1}/6 - Rep ${rep + 1}/2",
-                        ),
-                    )
-                    if (rep == 0) add(ProgramStep(StepKind.REST, 50))
-                }
-                if (set < 5) add(ProgramStep(StepKind.REST, 30))
+            repeat(10) { i ->
+                add(
+                    ProgramStep(
+                        kind = StepKind.WORK,
+                        durationSeconds = 10,
+                        percentOfMax = 0.70f,
+                        toleranceBandPoints = DEFAULT_TOLERANCE,
+                        label = "Set ${i + 1}/10",
+                    ),
+                )
+                if (i < 9) add(ProgramStep(StepKind.REST, 55))
             }
         },
     )
 
-    val all = listOf(MAX_HANGS, MAX_TESTING, WARM_UP, NO_HANGS)
+    val all = listOf(WARM_UP, NO_HANGS, MAX_HANGS, MAX_TESTING)
 }

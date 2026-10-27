@@ -1,5 +1,6 @@
 package com.wiktor.bigbanger.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,7 +24,9 @@ import com.wiktor.bigbanger.ble.ConnectionState
 import kotlin.math.roundToInt
 
 @Composable
-fun DeviceScreen(viewModel: BigBangerViewModel, device: BleDevice) {
+fun DeviceScreen(viewModel: BigBangerViewModel, device: BleDevice, onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
+
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
     val isMeasuring by viewModel.isMeasuring.collectAsStateWithLifecycle()
     val latestWeight by viewModel.latestWeightKg.collectAsStateWithLifecycle()

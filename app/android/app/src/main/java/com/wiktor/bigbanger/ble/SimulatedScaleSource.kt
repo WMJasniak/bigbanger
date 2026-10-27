@@ -25,6 +25,7 @@ class SimulatedScaleSource : ScaleSource {
     private val scope = CoroutineScope(Dispatchers.Main.immediate + Job())
     private var tickJob: Job? = null
     private var currentKg = 0f
+    private var noise = 0f
     private var targetBandKg: ClosedFloatingPointRange<Float>? = null
     private var startNanos = 0L
 
@@ -101,7 +102,9 @@ class SimulatedScaleSource : ScaleSource {
     private fun nextSample(previous: Float): Float {
         val target = targetBandKg?.let { (it.start + it.endInclusive) / 2f } ?: 0f
         val pull = (target - previous) * 0.08f
-        val noise = (Random.nextFloat() - 0.5f) * 0.6f
+        // Low-pass filtered noise (correlated between ticks) reads as a believable
+        // physical signal; independent per-tick noise looked jumpy/choppy on the chart.
+        noise = (noise * 0.85f) + ((Random.nextFloat() - 0.5f) * 0.15f)
         return (previous + pull + noise).coerceIn(-2f, 80f)
     }
 

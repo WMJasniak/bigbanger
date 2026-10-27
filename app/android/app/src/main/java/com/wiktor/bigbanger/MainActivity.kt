@@ -38,17 +38,24 @@ class MainActivity : ComponentActivity() {
                     val viewModel: BigBangerViewModel = viewModel()
                     var availableRelease by remember { mutableStateOf<ReleaseInfo?>(null) }
                     var updatePhase by remember { mutableStateOf<UpdatePhase>(UpdatePhase.Idle) }
+                    var manualCheckStatus by remember { mutableStateOf<String?>(null) }
 
                     fun checkForUpdates(force: Boolean) {
+                        if (force) manualCheckStatus = "Checking..."
                         lifecycleScope.launch {
                             val release = updater.checkLatest()
                             updateSettings.lastCheckMs = System.currentTimeMillis()
-                            if (release != null &&
-                                release.versionCode > BuildConfig.VERSION_CODE &&
-                                (force || release.versionCode != updateSettings.skippedVersionCode)
-                            ) {
+                            val isNewer = release != null && release.versionCode > BuildConfig.VERSION_CODE
+                            if (isNewer && (force || release!!.versionCode != updateSettings.skippedVersionCode)) {
                                 availableRelease = release
                                 updatePhase = UpdatePhase.Idle
+                                manualCheckStatus = null
+                            } else if (force) {
+                                manualCheckStatus = if (release == null) {
+                                    "Couldn't check right now -- try again later."
+                                } else {
+                                    "You're on the latest version."
+                                }
                             }
                         }
                     }
@@ -60,7 +67,11 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    BigBangerApp(viewModel)
+                    BigBangerApp(
+                        viewModel = viewModel,
+                        updateStatus = manualCheckStatus,
+                        onCheckUpdates = { checkForUpdates(force = true) },
+                    )
 
                     availableRelease?.let { release ->
                         UpdateDialog(
