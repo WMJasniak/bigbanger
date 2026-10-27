@@ -45,6 +45,37 @@ class ProgressorBleManager(context: Context) : ScaleSource {
     private var lastDevice: BleDevice? = null
     private var intentionalDisconnect = false
 
+    // Android's BluetoothGatt only tolerates one in-flight write/descriptor-write at a
+    // time -- issuing a second before the first's callback fires silently drops one of
+    // them on many stacks (Samsung included). The CCCD write that enables weight
+    // notifications and the control-point writes (tare/start/stop) must therefore be
+    // serialized through this queue rather than fired independently.
+    private val pendingGattOperations = ArrayDeque<() -> Boolean>()
+    private var gattOperationInFlight = false
+
+    private fun enqueueGattOperation(operation: () -> Boolean) {
+        pendingGattOperations.addLast(operation)
+        if (!gattOperationInFlight) runNextGattOperation()
+    }
+
+    private fun runNextGattOperation() {
+        val next = pendingGattOperations.removeFirstOrNull()
+        if (next == null) {
+            gattOperationInFlight = false
+            return
+        }
+        gattOperationInFlight = true
+        // If the OS rejects the request synchronously (e.g. link momentarily busy), no
+        // onCharacteristicWrite/onDescriptorWrite callback will ever arrive for it --
+        // advance immediately instead of stalling the queue forever.
+        if (!next()) runNextGattOperation()
+    }
+
+    private fun resetGattOperationQueue() {
+        pendingGattOperations.clear()
+        gattOperationInFlight = false
+    }
+
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     override val connectionState = _connectionState.asStateFlow()
 
@@ -91,6 +122,7 @@ class ProgressorBleManager(context: Context) : ScaleSource {
                     bluetoothGatt.close()
                     gatt = null
                     controlCharacteristic = null
+                    resetGattOperationQueue()
                     _isMeasuring.value = false
                     val device: BleDevice? = lastDevice
                     val underlyingDevice: BluetoothDevice? = device?.device
@@ -140,6 +172,14 @@ class ProgressorBleManager(context: Context) : ScaleSource {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return // handled by the overload above
             @Suppress("DEPRECATION")
             handleNotification(characteristic, characteristic.value ?: return)
+        }
+
+        override fun onDescriptorWrite(bluetoothGatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            runNextGattOperation()
+        }
+
+        override fun onCharacteristicWrite(bluetoothGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            runNextGattOperation()
         }
     }
 
@@ -222,13 +262,16 @@ class ProgressorBleManager(context: Context) : ScaleSource {
     private fun writeControlOpcode(opcode: Byte): Boolean {
         val bluetoothGatt = gatt ?: return false
         val characteristic = controlCharacteristic ?: return false
-        return writeCharacteristicCompat(bluetoothGatt, characteristic, byteArrayOf(opcode))
+        enqueueGattOperation { writeCharacteristicCompat(bluetoothGatt, characteristic, byteArrayOf(opcode)) }
+        return true
     }
 
     private fun enableWeightNotifications(bluetoothGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
         bluetoothGatt.setCharacteristicNotification(characteristic, true)
         val descriptor = characteristic.getDescriptor(ProgressorProtocol.CLIENT_CHARACTERISTIC_CONFIG_UUID) ?: return
-        writeDescriptorCompat(bluetoothGatt, descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+        enqueueGattOperation {
+            writeDescriptorCompat(bluetoothGatt, descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+        }
     }
 
     private fun writeCharacteristicCompat(
@@ -252,9 +295,9 @@ class ProgressorBleManager(context: Context) : ScaleSource {
         }
     }
 
-    private fun writeDescriptorCompat(bluetoothGatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, value: ByteArray) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            bluetoothGatt.writeDescriptor(descriptor, value)
+    private fun writeDescriptorCompat(bluetoothGatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, value: ByteArray): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            bluetoothGatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
         } else {
             @Suppress("DEPRECATION")
             descriptor.value = value
