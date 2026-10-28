@@ -8,12 +8,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,10 +29,15 @@ fun DeviceScreen(viewModel: BigBangerViewModel, device: BleDevice, onBack: () ->
     BackHandler(onBack = onBack)
 
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
-    val isMeasuring by viewModel.isMeasuring.collectAsStateWithLifecycle()
     val latestWeight by viewModel.latestWeightKg.collectAsStateWithLifecycle()
     val history by viewModel.weightHistory.collectAsStateWithLifecycle()
     val isConnected = connectionState is ConnectionState.Connected
+
+    // Raw Data just rolls continuously once connected -- no Start/Stop button to
+    // remember to press first.
+    LaunchedEffect(isConnected) {
+        if (isConnected) viewModel.startMeasurement()
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -68,24 +73,12 @@ fun DeviceScreen(viewModel: BigBangerViewModel, device: BleDevice, onBack: () ->
             modifier = Modifier.fillMaxWidth().height(220.dp).padding(bottom = 24.dp),
         )
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        OutlinedButton(
+            onClick = { viewModel.tare() },
+            enabled = isConnected,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            OutlinedButton(
-                onClick = { viewModel.tare() },
-                enabled = isConnected,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("Tare")
-            }
-            Button(
-                onClick = { viewModel.toggleMeasurement() },
-                enabled = isConnected,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(if (isMeasuring) "Stop" else "Start")
-            }
+            Text("Tare")
         }
     }
 }

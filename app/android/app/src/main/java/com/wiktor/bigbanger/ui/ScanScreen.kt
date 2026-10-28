@@ -26,6 +26,12 @@ import com.wiktor.bigbanger.ble.BleDevice
 
 @Composable
 fun ScanScreen(viewModel: BigBangerViewModel, onBack: (() -> Unit)? = null) {
+    // Without this, the system back gesture/button had nothing to intercept here and
+    // fell through to the Activity's default behavior -- closing the whole app instead
+    // of returning to Home, since this is a single-Activity app with no back stack of
+    // its own.
+    onBack?.let { BackHandler(onBack = it) }
+
     val devices by viewModel.scanResults.collectAsStateWithLifecycle()
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val sorted = devices.sortedByDescending { it.rssi }
