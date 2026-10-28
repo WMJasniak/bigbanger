@@ -10,6 +10,8 @@ import com.wiktor.bigbanger.ble.ScaleSource
 import com.wiktor.bigbanger.ble.SimulatedScaleSource
 import com.wiktor.bigbanger.ble.WeightSample
 import com.wiktor.bigbanger.training.ProgramDefinition
+import com.wiktor.bigbanger.training.ProgramStep
+import com.wiktor.bigbanger.training.StepKind
 import com.wiktor.bigbanger.training.TrainingRepo
 import com.wiktor.bigbanger.training.expandWithGripSequence
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -86,14 +88,26 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
      * If the user has configured an ordered grip list for this program (via its own
      * settings screen), expands it into a run through all of them, same shape as No
      * Hangs' own hardcoded sequence; otherwise returns [program] unchanged, so a
-     * program with nothing configured keeps asking which grip to use each run.
+     * program with nothing configured keeps asking which grip to use each run. Either
+     * way, the result always starts with a PREP step: an expanded/fixed sequence
+     * already leads with one per leg, but a plain single-grip program doesn't, so one
+     * is added here -- there should never be a run that goes straight from the Ready
+     * gate into a WORK step with no countdown to get into position first.
      */
     fun resolveProgramForRun(program: ProgramDefinition): ProgramDefinition {
-        if (program.usesFixedGripSequence) return program
-        val legs = trainingRepo.gripSequenceFor(program.id).mapNotNull { variant ->
-            trainingRepo.holdTypes.value.firstOrNull { it.id == variant.holdTypeId }?.let { it to variant }
+        val resolved = if (program.usesFixedGripSequence) {
+            program
+        } else {
+            val legs = trainingRepo.gripSequenceFor(program.id).mapNotNull { variant ->
+                trainingRepo.holdTypes.value.firstOrNull { it.id == variant.holdTypeId }?.let { it to variant }
+            }
+            expandWithGripSequence(program, legs)
         }
-        return expandWithGripSequence(program, legs)
+        return if (resolved.steps.firstOrNull()?.kind == StepKind.PREP) {
+            resolved
+        } else {
+            resolved.copy(steps = listOf(ProgramStep(kind = StepKind.PREP, durationSeconds = 10)) + resolved.steps)
+        }
     }
 
     /** Lets the Program Runner nudge the simulated signal toward the active target band; no-op on the real scale. */
