@@ -14,6 +14,9 @@ sealed interface Screen {
     data class HoldTypeSelect(val program: ProgramDefinition) : Screen
     data class GripVariantSelect(val program: ProgramDefinition, val holdType: HoldType) : Screen
 
+    /** The program's own settings: which grips it always uses, and in what order. */
+    data class ProgramGripConfig(val program: ProgramDefinition) : Screen
+
     /** [gripVariant]/[hand] are null for a program with a fixed grip sequence (e.g. No Hangs). */
     data class Running(val program: ProgramDefinition, val gripVariant: GripVariant?, val hand: Hand?) : Screen
     data object Stats : Screen

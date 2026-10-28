@@ -65,7 +65,8 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
     when (val s = screen) {
         Screen.Home -> HomeScreen(
             viewModel = viewModel,
-            onSelectProgram = { program ->
+            onSelectProgram = { baseProgram ->
+                val program = viewModel.resolveProgramForRun(baseProgram)
                 viewModel.ensureFixedGripSequenceSeeded(program)
                 val connected = viewModel.connectionState.value is ConnectionState.Connected
                 screen = when {
@@ -74,6 +75,7 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
                     else -> Screen.HoldTypeSelect(program)
                 }
             },
+            onOpenProgramGripConfig = { program -> screen = Screen.ProgramGripConfig(program) },
             onFreeMeasure = { screen = Screen.Connect(null) },
             onStats = { screen = Screen.Stats },
             onSettings = { screen = Screen.Settings },
@@ -125,6 +127,12 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
             gripVariant = s.gripVariant,
             selectedHand = s.hand,
             onFinished = { screen = Screen.Home },
+        )
+
+        is Screen.ProgramGripConfig -> ProgramGripConfigScreen(
+            viewModel = viewModel,
+            program = s.program,
+            onBack = { screen = Screen.Home },
         )
 
         Screen.Stats -> StatsScreen(viewModel = viewModel, onBack = { screen = Screen.Home })

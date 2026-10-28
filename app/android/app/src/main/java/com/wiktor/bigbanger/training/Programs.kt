@@ -127,3 +127,34 @@ object Programs {
 
     val all = listOf(WARM_UP, NO_HANGS, MAX_HANGS, MAX_TESTING)
 }
+
+private const val GRIP_SEQUENCE_PREP_SECONDS = 10
+
+/**
+ * Expands [base]'s own step template into a run through [legs] in the given order,
+ * each grip trained one hand at a time (left then right) -- the same shape No Hangs'
+ * hardcoded sequence already uses, just built from a user-chosen grip list instead of
+ * a fixed one. Returns [base] unchanged if [legs] is empty, so a program with nothing
+ * configured keeps today's "pick a grip, run it once" behavior.
+ */
+fun expandWithGripSequence(base: ProgramDefinition, legs: List<Pair<HoldType, GripVariant>>): ProgramDefinition {
+    if (legs.isEmpty()) return base
+    val handLegs = legs.flatMap { (holdType, variant) -> Hand.entries.map { hand -> Triple(holdType, variant, hand) } }
+    val legGapSeconds = base.steps.firstOrNull { it.kind == StepKind.REST }?.durationSeconds ?: 60
+    val steps = buildList {
+        handLegs.forEachIndexed { legIndex, (holdType, variant, hand) ->
+            add(ProgramStep(kind = StepKind.PREP, durationSeconds = GRIP_SEQUENCE_PREP_SECONDS, gripLabel = variant.name, hand = hand))
+            base.steps.forEach { templateStep ->
+                add(
+                    if (templateStep.kind == StepKind.WORK) {
+                        templateStep.copy(holdTypeName = holdType.name, gripLabel = variant.name, hand = hand)
+                    } else {
+                        templateStep
+                    },
+                )
+            }
+            if (legIndex != handLegs.lastIndex) add(ProgramStep(StepKind.REST, legGapSeconds))
+        }
+    }
+    return base.copy(steps = steps, usesFixedGripSequence = true)
+}

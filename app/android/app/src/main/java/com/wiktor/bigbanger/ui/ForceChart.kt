@@ -1,16 +1,19 @@
 package com.wiktor.bigbanger.ui
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -19,6 +22,7 @@ import com.wiktor.bigbanger.ble.WeightSample
 import com.wiktor.bigbanger.training.TargetSegment
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import androidx.compose.ui.graphics.lerp as lerpColor
 
 /** Fixed scrolling window, not "stretch to fit all data so far" -- the latter made the
  * whole trace visibly compress on every new sample, which read as choppy/jittery. */
@@ -30,6 +34,14 @@ private const val STRIP_TRANSITION_SECONDS = 0.4f
 /** Time step for sampling the strip's smoothed position -- fine enough to render the
  * transition curve itself smoothly, not just the flat parts of each segment. */
 private const val STRIP_SAMPLE_STEP_SECONDS = 0.1f
+
+// Panel background hue-shifts toward one of these during WORK vs REST/PREP, so the
+// background itself (not just the strip) signals which period you're in. Blended at a
+// low fraction into the theme's own panel color rather than used outright, since the
+// base is nearly desaturated and a pure hue rotation on it would barely show.
+private val WORK_TINT_COLOR = Color(0xFFE1551F)
+private val REST_TINT_COLOR = Color(0xFF3A7CA5)
+private const val PANEL_TINT_FRACTION = 0.16f
 
 @Composable
 fun ForceChart(
@@ -45,9 +57,18 @@ fun ForceChart(
      * an edge. */
     anchorFraction: Float = 1f,
     windowSeconds: Float = DEFAULT_WINDOW_SECONDS,
+    /** true = tint the panel warm (actively working), false = tint it cool (resting/
+     * prepping), null = no tint (plain reading, e.g. Raw Data, where neither applies). */
+    isWorking: Boolean? = null,
     modifier: Modifier = Modifier,
 ) {
-    val panelColor = MaterialTheme.colorScheme.surfaceVariant
+    val basePanelColor = MaterialTheme.colorScheme.surfaceVariant
+    val targetPanelColor = when (isWorking) {
+        true -> lerpColor(basePanelColor, WORK_TINT_COLOR, PANEL_TINT_FRACTION)
+        false -> lerpColor(basePanelColor, REST_TINT_COLOR, PANEL_TINT_FRACTION)
+        null -> basePanelColor
+    }
+    val panelColor by animateColorAsState(targetValue = targetPanelColor, label = "forceChartPanel")
     val lineColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
     val bandFillColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
@@ -75,11 +96,18 @@ fun ForceChart(
         val windowStart = now - windowSeconds * anchorFraction
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 
+        // Every target segment in view (not just the current one) counts toward the
+        // range, so a strip never gets clipped as it scrolls between legs with
+        // different maxes -- then a margin on top/bottom so a strip's edge, or its
+        // accent line, never sits exactly on the canvas boundary.
         val targetExtremes = sortedSegments.flatMap { listOf(it.centerKg - it.halfWidthKg, it.centerKg + it.halfWidthKg) }
         val sampleMin = visible.minOfOrNull { it.kilograms }
         val sampleMax = visible.maxOfOrNull { it.kilograms }
-        val minWeight = (listOf(0f, sampleMin ?: 0f) + targetExtremes).min()
-        val maxWeight = (listOf(minWeight + 1f, sampleMax ?: (minWeight + 1f)) + targetExtremes).max()
+        val rawMin = (listOf(0f, sampleMin ?: 0f) + targetExtremes).min()
+        val rawMax = (listOf(rawMin + 1f, sampleMax ?: (rawMin + 1f)) + targetExtremes).max()
+        val margin = (rawMax - rawMin) * 0.08f
+        val minWeight = rawMin - margin
+        val maxWeight = rawMax + margin
 
         fun yOf(kg: Float) = size.height - (kg - minWeight) / (maxWeight - minWeight) * size.height
 

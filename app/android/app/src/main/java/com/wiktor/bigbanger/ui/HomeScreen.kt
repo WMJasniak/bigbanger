@@ -28,6 +28,7 @@ import com.wiktor.bigbanger.training.Programs
 fun HomeScreen(
     viewModel: BigBangerViewModel,
     onSelectProgram: (ProgramDefinition) -> Unit,
+    onOpenProgramGripConfig: (ProgramDefinition) -> Unit,
     onFreeMeasure: () -> Unit,
     onStats: () -> Unit,
     onSettings: () -> Unit,
@@ -44,7 +45,12 @@ fun HomeScreen(
 
         LazyColumn(modifier = Modifier.weight(1f)) {
             items(Programs.all) { program ->
-                ProgramCard(program = program, onClick = { onSelectProgram(program) })
+                ProgramCard(
+                    program = program,
+                    onClick = { onSelectProgram(program) },
+                    // No Hangs already dictates its own grips; nothing to configure.
+                    onOpenGripConfig = if (program.usesFixedGripSequence) null else ({ onOpenProgramGripConfig(program) }),
+                )
             }
         }
 
@@ -62,7 +68,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun ProgramCard(program: ProgramDefinition, onClick: () -> Unit) {
+private fun ProgramCard(program: ProgramDefinition, onClick: () -> Unit, onOpenGripConfig: (() -> Unit)?) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -70,6 +76,11 @@ private fun ProgramCard(program: ProgramDefinition, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(program.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            onOpenGripConfig?.let {
+                TextButton(onClick = it) {
+                    Text("⚙", style = MaterialTheme.typography.titleMedium)
+                }
+            }
             Text(">", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

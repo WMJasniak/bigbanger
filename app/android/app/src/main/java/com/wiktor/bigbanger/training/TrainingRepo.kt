@@ -35,6 +35,11 @@ class TrainingRepo(context: Context) {
     private val _sessions = MutableStateFlow<List<SessionLogEntry>>(emptyList())
     val sessions = _sessions.asStateFlow()
 
+    /** Per-program, user-chosen and ordered grip variant IDs -- e.g. always running Max
+     * Hangs against the same grips in the same order instead of picking them each time. */
+    private val _programGripSequences = MutableStateFlow<Map<ProgramId, List<String>>>(emptyMap())
+    val programGripSequences = _programGripSequences.asStateFlow()
+
     fun load() {
         if (!file.exists()) return
         try {
@@ -73,6 +78,13 @@ class TrainingRepo(context: Context) {
                     timestampMs = s.getLong("timestampMs"),
                 )
             }
+
+            val sequences = root.optJSONObject("programGripSequences")
+            _programGripSequences.value = sequences?.keys()?.asSequence()?.mapNotNull { key ->
+                val programId = runCatching { ProgramId.valueOf(key) }.getOrNull() ?: return@mapNotNull null
+                val ids = sequences.getJSONArray(key)
+                programId to (0 until ids.length()).map { ids.getString(it) }
+            }?.toMap() ?: emptyMap()
         } catch (_: Exception) {
             // Corrupt or unreadable state: start fresh rather than crash.
         }
@@ -123,6 +135,14 @@ class TrainingRepo(context: Context) {
                         }
                     },
                 )
+                put(
+                    "programGripSequences",
+                    JSONObject().apply {
+                        _programGripSequences.value.forEach { (programId, variantIds) ->
+                            put(programId.name, JSONArray(variantIds))
+                        }
+                    },
+                )
             }
             file.writeText(root.toString())
         } catch (_: Exception) {
@@ -156,6 +176,19 @@ class TrainingRepo(context: Context) {
     fun deleteGripVariant(id: String) {
         _gripVariants.update { list -> list.filterNot { it.id == id } }
         _maxResults.update { list -> list.filterNot { it.gripVariantId == id } }
+        _programGripSequences.update { map -> map.mapValues { (_, ids) -> ids.filterNot { it == id } } }
+        save()
+    }
+
+    /** The ordered grips a program should always use, as set via its own settings
+     * screen; empty if the user hasn't configured one (fall back to picking each run). */
+    fun gripSequenceFor(programId: ProgramId): List<GripVariant> {
+        val ids = _programGripSequences.value[programId] ?: return emptyList()
+        return ids.mapNotNull { id -> _gripVariants.value.firstOrNull { it.id == id } }
+    }
+
+    fun setGripSequence(programId: ProgramId, variantIds: List<String>) {
+        _programGripSequences.update { it + (programId to variantIds) }
         save()
     }
 

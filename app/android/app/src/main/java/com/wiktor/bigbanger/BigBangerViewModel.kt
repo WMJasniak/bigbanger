@@ -11,6 +11,7 @@ import com.wiktor.bigbanger.ble.SimulatedScaleSource
 import com.wiktor.bigbanger.ble.WeightSample
 import com.wiktor.bigbanger.training.ProgramDefinition
 import com.wiktor.bigbanger.training.TrainingRepo
+import com.wiktor.bigbanger.training.expandWithGripSequence
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -79,6 +80,20 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
                     seedPeakKg = 1f,
                 )
             }
+    }
+
+    /**
+     * If the user has configured an ordered grip list for this program (via its own
+     * settings screen), expands it into a run through all of them, same shape as No
+     * Hangs' own hardcoded sequence; otherwise returns [program] unchanged, so a
+     * program with nothing configured keeps asking which grip to use each run.
+     */
+    fun resolveProgramForRun(program: ProgramDefinition): ProgramDefinition {
+        if (program.usesFixedGripSequence) return program
+        val legs = trainingRepo.gripSequenceFor(program.id).mapNotNull { variant ->
+            trainingRepo.holdTypes.value.firstOrNull { it.id == variant.holdTypeId }?.let { it to variant }
+        }
+        return expandWithGripSequence(program, legs)
     }
 
     /** Lets the Program Runner nudge the simulated signal toward the active target band; no-op on the real scale. */
