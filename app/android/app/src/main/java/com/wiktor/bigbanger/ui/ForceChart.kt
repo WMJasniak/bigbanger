@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -89,7 +90,10 @@ fun ForceChart(
         }
     }
 
-    Canvas(modifier = modifier.fillMaxSize()) {
+    // Compose does not clip a Canvas's drawing to its own bounds by default, so a
+    // reading beyond the y-axis range (now fixed to the target, not the readout) would
+    // otherwise paint past the chart's panel and onto whatever sits below it.
+    Canvas(modifier = modifier.fillMaxSize().clipToBounds()) {
         drawRoundRect(color = panelColor, cornerRadius = CornerRadius(20f, 20f))
 
         val now = (lastSample?.timestampSeconds ?: 0f) + idleElapsedSeconds.floatValue
@@ -115,9 +119,11 @@ fun ForceChart(
             rawMin = listOf(0f, sampleMin ?: 0f).min()
             rawMax = listOf(rawMin + 1f, sampleMax ?: (rawMin + 1f)).max()
         }
-        val margin = (rawMax - rawMin) * 0.08f
-        val minWeight = rawMin - margin
-        val maxWeight = rawMax + margin
+        // Less headroom above the target's own top than below it -- the ceiling above
+        // the band matters far less than the baseline/zero context underneath it.
+        val range = rawMax - rawMin
+        val minWeight = rawMin - range * 0.08f
+        val maxWeight = rawMax + range * 0.03f
 
         fun yOf(kg: Float) = size.height - (kg - minWeight) / (maxWeight - minWeight) * size.height
 
