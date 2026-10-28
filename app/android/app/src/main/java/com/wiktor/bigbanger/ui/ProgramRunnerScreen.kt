@@ -184,7 +184,11 @@ fun ProgramRunnerScreen(
         // of chasing an edge.
         ForceChart(
             samples = history,
-            targetTimeline = runner.targetTimeline(pastSeconds = RUNNER_CHART_WINDOW_SECONDS / 3f, futureSeconds = RUNNER_CHART_WINDOW_SECONDS * 2f / 3f),
+            targetTimeline = runner.targetTimeline(
+                pastSeconds = RUNNER_CHART_WINDOW_SECONDS / 3f,
+                futureSeconds = RUNNER_CHART_WINDOW_SECONDS * 2f / 3f,
+                nowTimestampSeconds = history.lastOrNull()?.timestampSeconds ?: 0f,
+            ),
             anchorFraction = 1f / 3f,
             windowSeconds = RUNNER_CHART_WINDOW_SECONDS,
             modifier = Modifier.weight(1f).fillMaxWidth(),

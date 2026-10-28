@@ -10,7 +10,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -24,6 +23,13 @@ import kotlinx.coroutines.isActive
 /** Fixed scrolling window, not "stretch to fit all data so far" -- the latter made the
  * whole trace visibly compress on every new sample, which read as choppy/jittery. */
 private const val DEFAULT_WINDOW_SECONDS = 12f
+
+/** How long the target strip takes to ease from one segment's position to the next. */
+private const val STRIP_TRANSITION_SECONDS = 0.4f
+
+/** Time step for sampling the strip's smoothed position -- fine enough to render the
+ * transition curve itself smoothly, not just the flat parts of each segment. */
+private const val STRIP_SAMPLE_STEP_SECONDS = 0.1f
 
 @Composable
 fun ForceChart(
@@ -46,17 +52,18 @@ fun ForceChart(
     val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
     val bandFillColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
     val bandEdgeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+    val sortedSegments = remember(targetTimeline) { targetTimeline.sortedBy { it.startOffsetSeconds } }
 
-    // Keeps the window scrolling at a real-time pace even with no new samples (e.g.
-    // during REST/PREP, when nothing is being measured) instead of freezing on the last
-    // sample's device timestamp. Resets to 0 every time a genuinely new sample arrives.
+    // Keeps the window scrolling at a real-time pace even with no new samples (e.g. a
+    // brief connection hiccup) instead of freezing on the last sample's device
+    // timestamp. Resets to 0 every time a genuinely new sample arrives.
     val lastSample = samples.lastOrNull()
     val idleElapsedSeconds = remember { mutableFloatStateOf(0f) }
     LaunchedEffect(lastSample) {
         idleElapsedSeconds.floatValue = 0f
         val startNanos = System.nanoTime()
         while (isActive) {
-            delay(100)
+            delay(33)
             idleElapsedSeconds.floatValue = (System.nanoTime() - startNanos) / 1_000_000_000f
         }
     }
@@ -68,7 +75,7 @@ fun ForceChart(
         val windowStart = now - windowSeconds * anchorFraction
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 
-        val targetExtremes = targetTimeline.flatMap { listOfNotNull(it.rangeKg?.start, it.rangeKg?.endInclusive) }
+        val targetExtremes = sortedSegments.flatMap { listOf(it.centerKg - it.halfWidthKg, it.centerKg + it.halfWidthKg) }
         val sampleMin = visible.minOfOrNull { it.kilograms }
         val sampleMax = visible.maxOfOrNull { it.kilograms }
         val minWeight = (listOf(0f, sampleMin ?: 0f) + targetExtremes).min()
@@ -92,15 +99,35 @@ fun ForceChart(
             drawLine(gridColor, Offset(0f, zeroY), Offset(size.width, zeroY), strokeWidth = 2f)
         }
 
-        for (segment in targetTimeline) {
-            val left = xOf(now + segment.startOffsetSeconds).coerceIn(0f, size.width)
-            val right = xOf(now + segment.endOffsetSeconds).coerceIn(0f, size.width)
-            if (right <= left) continue
-            val range = segment.rangeKg ?: (0f..0f)
-            val top = yOf(range.endInclusive)
-            val bottom = (yOf(range.start)).coerceAtLeast(top + 3f)
-            drawRect(color = bandFillColor, topLeft = Offset(left, top), size = Size(right - left, bottom - top))
-            drawLine(bandEdgeColor, Offset(left, top), Offset(right, top), strokeWidth = 2f)
+        if (sortedSegments.isNotEmpty()) {
+            val timeStart = -windowSeconds * anchorFraction
+            val timeEnd = windowSeconds * (1f - anchorFraction)
+            val topEdgePath = Path()
+            val fillPath = Path()
+            val bottomPoints = ArrayList<Offset>((((timeEnd - timeStart) / STRIP_SAMPLE_STEP_SECONDS) + 2).toInt())
+            var started = false
+            var t = timeStart
+            while (t <= timeEnd) {
+                val (center, half) = smoothedStripAt(sortedSegments, t)
+                val x = xOf(now + t)
+                val topY = yOf(center + half)
+                val bottomY = yOf(center - half)
+                if (!started) {
+                    topEdgePath.moveTo(x, topY)
+                    fillPath.moveTo(x, topY)
+                    started = true
+                } else {
+                    topEdgePath.lineTo(x, topY)
+                    fillPath.lineTo(x, topY)
+                }
+                bottomPoints.add(Offset(x, bottomY))
+                t += STRIP_SAMPLE_STEP_SECONDS
+            }
+            for (p in bottomPoints.asReversed()) fillPath.lineTo(p.x, p.y)
+            fillPath.close()
+
+            drawPath(path = fillPath, color = bandFillColor)
+            drawPath(path = topEdgePath, color = bandEdgeColor, style = Stroke(width = 2f))
         }
 
         if (visible.size >= 2) {
@@ -138,3 +165,37 @@ fun ForceChart(
         }
     }
 }
+
+/**
+ * The strip's (center, halfWidth) at time offset [t], easing between adjacent segments
+ * over [STRIP_TRANSITION_SECONDS] around each boundary instead of cutting sharply --
+ * [sorted] must already be ordered by [TargetSegment.startOffsetSeconds].
+ */
+private fun smoothedStripAt(sorted: List<TargetSegment>, t: Float): Pair<Float, Float> {
+    val index = sorted.indexOfFirst { t >= it.startOffsetSeconds && t < it.endOffsetSeconds }
+        .let { if (it >= 0) it else if (t < sorted.first().startOffsetSeconds) 0 else sorted.lastIndex }
+    val current = sorted[index]
+    val half = STRIP_TRANSITION_SECONDS / 2f
+
+    val distToStart = t - current.startOffsetSeconds
+    if (distToStart < half && index > 0) {
+        val prev = sorted[index - 1]
+        val eased = smoothstep(((distToStart + half) / STRIP_TRANSITION_SECONDS).coerceIn(0f, 1f))
+        return lerp(prev.centerKg, current.centerKg, eased) to lerp(prev.halfWidthKg, current.halfWidthKg, eased)
+    }
+    val distToEnd = current.endOffsetSeconds - t
+    if (distToEnd < half && index < sorted.lastIndex) {
+        val next = sorted[index + 1]
+        val eased = smoothstep(((half - distToEnd) / STRIP_TRANSITION_SECONDS).coerceIn(0f, 1f))
+        return lerp(current.centerKg, next.centerKg, eased) to lerp(current.halfWidthKg, next.halfWidthKg, eased)
+    }
+    return current.centerKg to current.halfWidthKg
+}
+
+/** An S-shaped ease from 0 to 1, reading the same as a sigmoid for this purpose. */
+private fun smoothstep(x: Float): Float {
+    val c = x.coerceIn(0f, 1f)
+    return c * c * (3f - 2f * c)
+}
+
+private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t

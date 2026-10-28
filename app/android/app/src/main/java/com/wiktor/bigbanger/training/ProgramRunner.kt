@@ -12,14 +12,16 @@ import kotlinx.coroutines.launch
 
 /**
  * One stretch of program time, as an offset in seconds from "now" (negative = past,
- * positive = future, computed by [ProgramRunner.targetTimeline]). [rangeKg] is null for
- * a step with no target of its own (REST/PREP) -- the chart renders that as a strip
- * collapsed near zero rather than as a gap.
+ * positive = future, computed by [ProgramRunner.targetTimeline]). [centerKg]/[halfWidthKg]
+ * describe a band of constant thickness that moves between the WORK target level and
+ * zero for REST/PREP, rather than appearing/disappearing or changing thickness --
+ * [ui.ForceChart] then smooths the handoff between adjacent segments itself.
  */
 data class TargetSegment(
     val startOffsetSeconds: Float,
     val endOffsetSeconds: Float,
-    val rangeKg: ClosedFloatingPointRange<Float>?,
+    val centerKg: Float,
+    val halfWidthKg: Float,
 )
 
 sealed interface RunnerPhase {
@@ -44,10 +46,13 @@ sealed interface RunnerPhase {
  * and driven by the caller's CoroutineScope (cancelled when it leaves
  * composition), matching the house style (see Morse's Repo/MorsePlayer).
  *
- * Measurement is started/stopped once per WORK step, not once for the whole
- * program: each attempt's peak is then trivially scoped to just that hold,
- * and REST steps show no chart at all, so the live force value is never
- * rendered as a number outside a WORK step.
+ * Measurement runs continuously for the whole program, started once in
+ * [start] and stopped only on [cancel]/[finishEarly]/natural completion --
+ * not restarted per WORK step -- so the live force trace keeps plotting
+ * through REST/PREP too, instead of going blank between holds. A no-target
+ * WORK step's peak is scoped to just its own hold by filtering on
+ * [stepStartTimestampSeconds] rather than by relying on history being empty
+ * at the start of the step.
  */
 class ProgramRunner(
     val program: ProgramDefinition,
@@ -63,8 +68,8 @@ class ProgramRunner(
     var phase: RunnerPhase by mutableStateOf(RunnerPhase.NotStarted)
         private set
 
-    private var measuringWhenInterrupted = false
     private var tickJob: Job? = null
+    private var stepStartTimestampSeconds = 0f
 
     val currentStep: ProgramStep get() = program.steps[stepIndex]
 
@@ -81,34 +86,49 @@ class ProgramRunner(
     val targetRangeKg: ClosedFloatingPointRange<Float>? get() = bandFor(currentStep)
 
     /**
-     * The target band for a window of program time around "now" (negative offsets =
-     * past, positive = future), for drawing a rolling strip on the chart that scrolls
-     * at the same rate as the data: tall over an upcoming/recent WORK step's target,
-     * collapsed near zero over a REST/PREP step, continuously, not just for the
-     * current step the way [targetRangeKg] is.
+     * The target band for a window of program time around "now", expressed as a
+     * constant-thickness band whose position moves between a WORK step's target and
+     * zero for REST/PREP (so those render the same width as the WORK step they
+     * border). [nowTimestampSeconds] anchors "now" to the same device-clock reading
+     * the chart's real data uses, rather than this runner's own once-a-second
+     * countdown, so the two scroll in lockstep instead of drifting apart.
      */
-    fun targetTimeline(pastSeconds: Float, futureSeconds: Float): List<TargetSegment> {
+    fun targetTimeline(pastSeconds: Float, futureSeconds: Float, nowTimestampSeconds: Float): List<TargetSegment> {
+        fun centerAndHalf(step: ProgramStep, fallbackHalf: Float): Pair<Float, Float> {
+            val band = bandFor(step) ?: return 0f to fallbackHalf
+            return (band.start + band.endInclusive) / 2f to (band.endInclusive - band.start) / 2f
+        }
+
+        val elapsed = (nowTimestampSeconds - stepStartTimestampSeconds)
+            .coerceIn(0f, currentStep.durationSeconds.toFloat())
+        val remaining = currentStep.durationSeconds - elapsed
+
         val segments = mutableListOf<TargetSegment>()
+        val (curCenter, curHalf) = centerAndHalf(currentStep, 0f)
+        segments.add(TargetSegment(-elapsed, remaining, curCenter, curHalf))
 
-        val elapsedInCurrent = (currentStep.durationSeconds - remainingSeconds).toFloat()
-        segments.add(TargetSegment(-elapsedInCurrent, remainingSeconds.toFloat(), bandFor(currentStep)))
-
-        var cursor = -elapsedInCurrent
+        var halfCursor = curHalf
+        var cursor = -elapsed
         var i = stepIndex - 1
         while (cursor > -pastSeconds && i >= 0) {
             val step = program.steps[i]
             val start = cursor - step.durationSeconds
-            segments.add(TargetSegment(start, cursor, bandFor(step)))
+            val (center, half) = centerAndHalf(step, halfCursor)
+            halfCursor = half
+            segments.add(TargetSegment(start, cursor, center, half))
             cursor = start
             i -= 1
         }
 
-        cursor = remainingSeconds.toFloat()
+        halfCursor = curHalf
+        cursor = remaining
         i = stepIndex + 1
         while (cursor < futureSeconds && i < program.steps.size) {
             val step = program.steps[i]
             val end = cursor + step.durationSeconds
-            segments.add(TargetSegment(cursor, end, bandFor(step)))
+            val (center, half) = centerAndHalf(step, halfCursor)
+            halfCursor = half
+            segments.add(TargetSegment(cursor, end, center, half))
             cursor = end
             i += 1
         }
@@ -116,7 +136,10 @@ class ProgramRunner(
         return segments
     }
 
-    fun start() = runStep()
+    fun start() {
+        onSetMeasuring(true)
+        runStep()
+    }
 
     fun togglePause() {
         when (phase) {
@@ -136,15 +159,16 @@ class ProgramRunner(
     fun pauseForDisconnect() {
         if (phase != RunnerPhase.Running) return
         tickJob?.cancel()
-        measuringWhenInterrupted = currentStep.kind == StepKind.WORK
-        if (measuringWhenInterrupted) onSetMeasuring(false)
+        onSetMeasuring(false)
         phase = RunnerPhase.ConnectionLost
     }
 
     /** Call once the scale reconnects. No-op unless currently paused for a connection loss. */
     fun resumeAfterReconnect() {
         if (phase != RunnerPhase.ConnectionLost) return
-        if (measuringWhenInterrupted) onSetMeasuring(true)
+        onSetMeasuring(true)
+        // The device's own clock (and its history) resets with the fresh connection.
+        stepStartTimestampSeconds = currentHistory().lastOrNull()?.timestampSeconds ?: 0f
         phase = RunnerPhase.Running
         startTicking()
     }
@@ -178,8 +202,8 @@ class ProgramRunner(
     private fun runStep() {
         tickJob?.cancel()
         remainingSeconds = currentStep.durationSeconds
+        stepStartTimestampSeconds = currentHistory().lastOrNull()?.timestampSeconds ?: 0f
         phase = RunnerPhase.Running
-        if (currentStep.kind == StepKind.WORK) onSetMeasuring(true)
         startTicking()
     }
 
@@ -197,19 +221,19 @@ class ProgramRunner(
 
     private fun onStepTimerElapsed() {
         val step = currentStep
-        if (step.kind == StepKind.WORK) {
-            onSetMeasuring(false)
-            if (step.percentOfMax == null) {
-                val peak = currentHistory().maxOfOrNull { it.kilograms } ?: 0f
-                phase = RunnerPhase.AwaitingAttemptDecision(peak)
-                return
-            }
+        if (step.kind == StepKind.WORK && step.percentOfMax == null) {
+            val peak = currentHistory()
+                .filter { it.timestampSeconds >= stepStartTimestampSeconds }
+                .maxOfOrNull { it.kilograms } ?: 0f
+            phase = RunnerPhase.AwaitingAttemptDecision(peak)
+            return
         }
         advance()
     }
 
     private fun advance() {
         if (stepIndex >= program.steps.lastIndex) {
+            onSetMeasuring(false)
             phase = RunnerPhase.Finished
             return
         }
