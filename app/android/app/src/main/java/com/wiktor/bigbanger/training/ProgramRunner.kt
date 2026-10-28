@@ -10,6 +10,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/**
+ * One stretch of program time, as an offset in seconds from "now" (negative = past,
+ * positive = future, computed by [ProgramRunner.targetTimeline]). [rangeKg] is null for
+ * a step with no target of its own (REST/PREP) -- the chart renders that as a strip
+ * collapsed near zero rather than as a gap.
+ */
+data class TargetSegment(
+    val startOffsetSeconds: Float,
+    val endOffsetSeconds: Float,
+    val rangeKg: ClosedFloatingPointRange<Float>?,
+)
+
 sealed interface RunnerPhase {
     /** Before [ProgramRunner.start] has been called (e.g. still on the Ready gate). */
     data object NotStarted : RunnerPhase
@@ -69,12 +81,40 @@ class ProgramRunner(
     val targetRangeKg: ClosedFloatingPointRange<Float>? get() = bandFor(currentStep)
 
     /**
-     * Same band, but falls forward to the next step that has one (e.g. during REST/PREP,
-     * which never carry a target of their own) so the chart's target band stays visible
-     * continuously instead of disappearing outside WORK steps.
+     * The target band for a window of program time around "now" (negative offsets =
+     * past, positive = future), for drawing a rolling strip on the chart that scrolls
+     * at the same rate as the data: tall over an upcoming/recent WORK step's target,
+     * collapsed near zero over a REST/PREP step, continuously, not just for the
+     * current step the way [targetRangeKg] is.
      */
-    val displayTargetRangeKg: ClosedFloatingPointRange<Float>?
-        get() = (stepIndex until program.steps.size).firstNotNullOfOrNull { bandFor(program.steps[it]) }
+    fun targetTimeline(pastSeconds: Float, futureSeconds: Float): List<TargetSegment> {
+        val segments = mutableListOf<TargetSegment>()
+
+        val elapsedInCurrent = (currentStep.durationSeconds - remainingSeconds).toFloat()
+        segments.add(TargetSegment(-elapsedInCurrent, remainingSeconds.toFloat(), bandFor(currentStep)))
+
+        var cursor = -elapsedInCurrent
+        var i = stepIndex - 1
+        while (cursor > -pastSeconds && i >= 0) {
+            val step = program.steps[i]
+            val start = cursor - step.durationSeconds
+            segments.add(TargetSegment(start, cursor, bandFor(step)))
+            cursor = start
+            i -= 1
+        }
+
+        cursor = remainingSeconds.toFloat()
+        i = stepIndex + 1
+        while (cursor < futureSeconds && i < program.steps.size) {
+            val step = program.steps[i]
+            val end = cursor + step.durationSeconds
+            segments.add(TargetSegment(cursor, end, bandFor(step)))
+            cursor = end
+            i += 1
+        }
+
+        return segments
+    }
 
     fun start() = runStep()
 

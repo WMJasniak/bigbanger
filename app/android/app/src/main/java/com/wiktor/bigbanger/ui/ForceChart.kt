@@ -1,12 +1,10 @@
 package com.wiktor.bigbanger.ui
 
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -19,6 +17,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.wiktor.bigbanger.ble.WeightSample
+import com.wiktor.bigbanger.training.TargetSegment
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -29,11 +28,16 @@ private const val DEFAULT_WINDOW_SECONDS = 12f
 @Composable
 fun ForceChart(
     samples: List<WeightSample>,
-    targetRangeKg: ClosedFloatingPointRange<Float>? = null,
-    /** True while a WORK step is actively measuring. Drives a vertical marker at the
-     * live edge: full height while working, animating down to nothing once it stops --
-     * so it reads as a pulse settling, not an abrupt cut. */
-    isWorking: Boolean = false,
+    /** A rolling target strip: tall over an upcoming/recent WORK step's band, collapsed
+     * near zero over REST/PREP, scrolling at the same rate as the data. Empty = no strip. */
+    targetTimeline: List<TargetSegment> = emptyList(),
+    /** Where "now" sits across the chart's width, 0f (left edge) to 1f (right edge).
+     * 1f (the default) matches a plain live reading: the latest point hugs the edge
+     * and everything visible is past data. A smaller fraction (e.g. 1/3) leaves room
+     * to the right for [targetTimeline]'s future segments, and keeps the live point
+     * fixed in place -- with the data scrolling underneath it -- instead of pinned to
+     * an edge. */
+    anchorFraction: Float = 1f,
     windowSeconds: Float = DEFAULT_WINDOW_SECONDS,
     modifier: Modifier = Modifier,
 ) {
@@ -42,7 +46,6 @@ fun ForceChart(
     val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
     val bandFillColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
     val bandEdgeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-    val markerHeightFraction by animateFloatAsState(targetValue = if (isWorking) 1f else 0f, label = "forceChartMarker")
 
     // Keeps the window scrolling at a real-time pace even with no new samples (e.g.
     // during REST/PREP, when nothing is being measured) instead of freezing on the last
@@ -61,21 +64,22 @@ fun ForceChart(
     Canvas(modifier = modifier.fillMaxSize()) {
         drawRoundRect(color = panelColor, cornerRadius = CornerRadius(20f, 20f))
 
-        val latestTime = (lastSample?.timestampSeconds ?: 0f) + idleElapsedSeconds.floatValue
-        val windowStart = (latestTime - windowSeconds).coerceAtLeast(0f)
+        val now = (lastSample?.timestampSeconds ?: 0f) + idleElapsedSeconds.floatValue
+        val windowStart = now - windowSeconds * anchorFraction
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 
+        val targetExtremes = targetTimeline.flatMap { listOfNotNull(it.rangeKg?.start, it.rangeKg?.endInclusive) }
         val sampleMin = visible.minOfOrNull { it.kilograms }
         val sampleMax = visible.maxOfOrNull { it.kilograms }
-        val minWeight = minOf(0f, sampleMin ?: 0f, targetRangeKg?.start ?: 0f)
-        val maxWeight = maxOf(
-            minWeight + 1f,
-            sampleMax ?: (minWeight + 1f),
-            targetRangeKg?.endInclusive ?: (minWeight + 1f),
-        )
+        val minWeight = (listOf(0f, sampleMin ?: 0f) + targetExtremes).min()
+        val maxWeight = (listOf(minWeight + 1f, sampleMax ?: (minWeight + 1f)) + targetExtremes).max()
 
         fun yOf(kg: Float) = size.height - (kg - minWeight) / (maxWeight - minWeight) * size.height
-        fun xOf(t: Float) = ((t - windowStart) / windowSeconds * size.width).coerceIn(0f, size.width)
+
+        // "now" always lands at anchorFraction across, regardless of windowStart -- the
+        // live point stays put and the data rolls underneath it, rather than the point
+        // itself sliding toward an edge as samples arrive.
+        fun xOf(t: Float) = (anchorFraction + (t - now) / windowSeconds) * size.width
 
         // Horizontal gridlines, including the zero line.
         val gridLines = 4
@@ -88,23 +92,15 @@ fun ForceChart(
             drawLine(gridColor, Offset(0f, zeroY), Offset(size.width, zeroY), strokeWidth = 2f)
         }
 
-        targetRangeKg?.let { range ->
+        for (segment in targetTimeline) {
+            val left = xOf(now + segment.startOffsetSeconds).coerceIn(0f, size.width)
+            val right = xOf(now + segment.endOffsetSeconds).coerceIn(0f, size.width)
+            if (right <= left) continue
+            val range = segment.rangeKg ?: (0f..0f)
             val top = yOf(range.endInclusive)
-            val bottom = yOf(range.start)
-            drawRect(color = bandFillColor, topLeft = Offset(0f, top), size = Size(size.width, bottom - top))
-            drawLine(bandEdgeColor, Offset(0f, top), Offset(size.width, top), strokeWidth = 2f)
-            drawLine(bandEdgeColor, Offset(0f, bottom), Offset(size.width, bottom), strokeWidth = 2f)
-        }
-
-        if (markerHeightFraction > 0.01f) {
-            val markerX = xOf(latestTime)
-            val markerHeight = size.height * markerHeightFraction
-            drawLine(
-                lineColor.copy(alpha = 0.5f),
-                Offset(markerX, size.height),
-                Offset(markerX, size.height - markerHeight),
-                strokeWidth = 6f,
-            )
+            val bottom = (yOf(range.start)).coerceAtLeast(top + 3f)
+            drawRect(color = bandFillColor, topLeft = Offset(left, top), size = Size(right - left, bottom - top))
+            drawLine(bandEdgeColor, Offset(left, top), Offset(right, top), strokeWidth = 2f)
         }
 
         if (visible.size >= 2) {

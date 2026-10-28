@@ -3,11 +3,13 @@ package com.wiktor.bigbanger.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -19,12 +21,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,6 +39,9 @@ import com.wiktor.bigbanger.training.ProgramRunner
 import com.wiktor.bigbanger.training.ProgramStep
 import com.wiktor.bigbanger.training.RunnerPhase
 import com.wiktor.bigbanger.training.StepKind
+
+/** ~1 WORK hold of past, ~1 REST of future preview, either side of the live point. */
+private const val RUNNER_CHART_WINDOW_SECONDS = 30f
 
 @Composable
 fun ProgramRunnerScreen(
@@ -154,28 +160,33 @@ fun ProgramRunnerScreen(
                 modifier = Modifier.padding(vertical = 16.dp),
             )
         } else {
-            // Right-aligned within the left half of the screen, so the last digit always
-            // lands exactly on the screen's horizontal middle no matter how many digits
-            // are showing -- centering the whole string instead would let that edge drift
-            // sideways between e.g. "9s" and "10s".
-            Box(modifier = Modifier.fillMaxWidth(0.5f).padding(vertical = 16.dp)) {
+            // The text's own width is measured and used to offset it, so its right edge
+            // lands exactly on the container's horizontal middle no matter how many
+            // digits are showing -- a fractional-width box wasn't landing there reliably.
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+                var textWidthPx by remember { mutableIntStateOf(0) }
+                val density = LocalDensity.current
                 Text(
                     "${runner.remainingSeconds}s",
                     style = MaterialTheme.typography.displayMedium,
-                    modifier = Modifier.align(Alignment.CenterEnd),
+                    onTextLayout = { textWidthPx = it.size.width },
+                    modifier = Modifier.offset(
+                        x = with(density) { (constraints.maxWidth / 2 - textWidthPx).toDp() },
+                    ),
                 )
             }
         }
 
         // Always mounted (never conditionally shown/hidden) so it keeps its slot in the
         // middle of the screen and the Pause/Cancel row below it never moves. The target
-        // band shows continuously (falling forward to the next one during REST/PREP), and
-        // a marker at the live edge is full height while working and settles to nothing
-        // once the hold ends.
+        // strip rolls at the same rate as the data and stays anchored a third of the way
+        // across so the live point holds still while the data scrolls under it, instead
+        // of chasing an edge.
         ForceChart(
             samples = history,
-            targetRangeKg = runner.displayTargetRangeKg,
-            isWorking = step.kind == StepKind.WORK,
+            targetTimeline = runner.targetTimeline(pastSeconds = RUNNER_CHART_WINDOW_SECONDS / 3f, futureSeconds = RUNNER_CHART_WINDOW_SECONDS * 2f / 3f),
+            anchorFraction = 1f / 3f,
+            windowSeconds = RUNNER_CHART_WINDOW_SECONDS,
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
 
