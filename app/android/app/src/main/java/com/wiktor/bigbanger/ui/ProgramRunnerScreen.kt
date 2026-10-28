@@ -2,11 +2,14 @@ package com.wiktor.bigbanger.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
@@ -24,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
@@ -101,6 +105,24 @@ fun ProgramRunnerScreen(
     val step = runner.currentStep
     val phase = runner.phase
 
+    // During REST, preview the *next* step's grip/hand (muted) instead of this step's
+    // (there isn't one) -- and keep showing the *previous* step's rep counter instead of
+    // letting it go blank. Both exist so nothing in the top block appears/disappears
+    // between WORK and REST, which was what made the Pause/Cancel row and the chart
+    // shift position every other step.
+    val isRest = step.kind == StepKind.REST
+    val gripHandText = if (isRest) {
+        program.steps.getOrNull(runner.stepIndex + 1)?.let { upcoming -> gripHandLabel(upcoming)?.let { "Next: $it" } }
+    } else {
+        gripHandLabel(step)
+    }
+    val repCounterText = if (isRest) program.steps.getOrNull(runner.stepIndex - 1)?.label else step.label
+    val restProgress = if (step.kind == StepKind.WORK || step.durationSeconds <= 0) {
+        null
+    } else {
+        1f - (runner.remainingSeconds.toFloat() / step.durationSeconds)
+    }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         LinearProgressIndicator(
             progress = { (runner.stepIndex + 1f) / program.steps.size },
@@ -117,43 +139,47 @@ fun ProgramRunnerScreen(
             modifier = Modifier.padding(top = 16.dp),
         )
 
-        // The grip/hand for this step, or -- during REST -- a preview of the next
-        // step's, so there's always advance notice of what to get into position for.
-        val gripHandText = if (step.kind == StepKind.REST) {
-            program.steps.getOrNull(runner.stepIndex + 1)?.let { upcoming -> gripHandLabel(upcoming)?.let { "Next: $it" } }
-        } else {
-            gripHandLabel(step)
-        }
         gripHandText?.let {
             Text(
                 it,
                 style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
+                fontWeight = if (isRest) FontWeight.Normal else FontWeight.Bold,
+                color = if (isRest) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
-        step.label?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
 
-        when (phase) {
-            RunnerPhase.ConnectionLost -> {
-                Text(
-                    "Scale disconnected -- turn it back on to continue. Your progress is saved.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(vertical = 24.dp),
-                )
-            }
-            else -> {
-                Text(
-                    "${runner.remainingSeconds}s",
-                    style = MaterialTheme.typography.displayMedium,
-                    modifier = Modifier.padding(vertical = 16.dp),
-                )
-                if (step.kind == StepKind.WORK) {
-                    ForceChart(samples = history, targetRangeKg = runner.targetRangeKg)
-                }
-            }
+        Box(modifier = Modifier.height(20.dp)) {
+            repCounterText?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
         }
+
+        if (phase == RunnerPhase.ConnectionLost) {
+            Text(
+                "Scale disconnected -- turn it back on to continue. Your progress is saved.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(vertical = 16.dp),
+            )
+        } else {
+            // Fixed width + centered so the digit count changing (e.g. 10s -> 9s)
+            // doesn't shift anything else sideways.
+            Text(
+                "${runner.remainingSeconds}s",
+                style = MaterialTheme.typography.displayMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.width(160.dp).padding(vertical = 16.dp),
+            )
+        }
+
+        // Always mounted (never conditionally shown/hidden) so it keeps its slot in the
+        // middle of the screen and the Pause/Cancel row below it never moves. During
+        // REST/PREP it shows a faint left-to-right wash building up to the next WORK step.
+        ForceChart(
+            samples = history,
+            targetRangeKg = runner.targetRangeKg,
+            restProgress = restProgress,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp),

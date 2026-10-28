@@ -1,8 +1,7 @@
 package com.wiktor.bigbanger.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -14,7 +13,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.unit.dp
 import com.wiktor.bigbanger.ble.WeightSample
 
 /** Fixed scrolling window, not "stretch to fit all data so far" -- the latter made the
@@ -25,6 +23,10 @@ private const val DEFAULT_WINDOW_SECONDS = 12f
 fun ForceChart(
     samples: List<WeightSample>,
     targetRangeKg: ClosedFloatingPointRange<Float>? = null,
+    /** 0f..1f while idle (REST/PREP): a faint left-to-right wash + edge line building up
+     * toward the next WORK step, so the chart stays mounted and useful between holds
+     * instead of appearing/disappearing (which was shifting the rest of the layout). */
+    restProgress: Float? = null,
     windowSeconds: Float = DEFAULT_WINDOW_SECONDS,
     modifier: Modifier = Modifier,
 ) {
@@ -34,7 +36,7 @@ fun ForceChart(
     val bandFillColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
     val bandEdgeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
 
-    Canvas(modifier = modifier.fillMaxWidth().height(220.dp)) {
+    Canvas(modifier = modifier.fillMaxSize()) {
         drawRoundRect(color = panelColor, cornerRadius = CornerRadius(20f, 20f))
 
         val latestTime = samples.lastOrNull()?.timestampSeconds ?: 0f
@@ -70,6 +72,12 @@ fun ForceChart(
             drawRect(color = bandFillColor, topLeft = Offset(0f, top), size = Size(size.width, bottom - top))
             drawLine(bandEdgeColor, Offset(0f, top), Offset(size.width, top), strokeWidth = 2f)
             drawLine(bandEdgeColor, Offset(0f, bottom), Offset(size.width, bottom), strokeWidth = 2f)
+        }
+
+        restProgress?.let { progress ->
+            val x = (size.width * progress).coerceIn(0f, size.width)
+            drawRect(color = lineColor.copy(alpha = 0.10f), topLeft = Offset(0f, 0f), size = Size(x, size.height))
+            drawLine(lineColor.copy(alpha = 0.45f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 3f)
         }
 
         if (visible.size >= 2) {
