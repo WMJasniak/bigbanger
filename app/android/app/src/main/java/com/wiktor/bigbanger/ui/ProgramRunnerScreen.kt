@@ -23,6 +23,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
@@ -107,10 +108,30 @@ fun ProgramRunnerScreen(
         )
 
         Text(
-            if (step.kind == StepKind.WORK) "Work" else "Rest",
+            when (step.kind) {
+                StepKind.WORK -> "Work"
+                StepKind.REST -> "Rest"
+                StepKind.PREP -> "Get ready"
+            },
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(top = 16.dp),
         )
+
+        // The grip/hand for this step, or -- during REST -- a preview of the next
+        // step's, so there's always advance notice of what to get into position for.
+        val gripHandText = if (step.kind == StepKind.REST) {
+            program.steps.getOrNull(runner.stepIndex + 1)?.let { upcoming -> gripHandLabel(upcoming)?.let { "Next: $it" } }
+        } else {
+            gripHandLabel(step)
+        }
+        gripHandText?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
         step.label?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
 
         when (phase) {
@@ -165,6 +186,11 @@ fun ProgramRunnerScreen(
             onFinishEarly = { runner.finishEarly() },
         )
     }
+}
+
+private fun gripHandLabel(step: ProgramStep): String? {
+    val grip = step.gripLabel ?: return null
+    return if (step.hand != null) "$grip — ${step.hand.displayLabel}" else grip
 }
 
 @Composable

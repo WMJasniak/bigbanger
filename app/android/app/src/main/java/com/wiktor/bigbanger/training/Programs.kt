@@ -10,20 +10,25 @@ package com.wiktor.bigbanger.training
  * Climbers", Sports Medicine - Open, 2024): a fixed sequence of 6 grip
  * positions, 10s hold / 20s rest, at roughly 40% of each grip's own max --
  * the paper doesn't measure load precisely, only instructing "a small
- * strain," so 40% is the closest documented figure.
+ * strain," so 40% is the closest documented figure. The paper itself hangs
+ * both hands at once off a bar; BigBanger's scale only measures one point of
+ * load, so each grip is trained one hand at a time instead -- left then
+ * right -- which the paper doesn't call for but is this app's own necessary
+ * adaptation to a single-load-cell device.
  */
 object Programs {
     private const val DEFAULT_TOLERANCE = 0.05f
+    private const val NO_HANGS_PREP_SECONDS = 10
 
-    /** The 6 fixed grip positions No Hangs cycles through, named for a 20mm edge. */
-    private object NoHangsGrip {
-        const val FOUR_FINGER_HALF_CRIMP = "20mm 4-Finger Half Crimp"
-        const val FRONT_3_OPEN = "20mm Front-3 Open"
-        const val FRONT_2_OPEN = "20mm Front-2 Open"
-        const val MIDDLE_2_OPEN = "20mm Middle-2 Open"
-        const val FRONT_2_HALF_CRIMP = "20mm Front-2 Half Crimp"
-        const val MIDDLE_2_HALF_CRIMP = "20mm Middle-2 Half Crimp"
-    }
+    /** The 6 fixed grip positions No Hangs cycles through, one 20mm-edge rep count each. */
+    private val NO_HANGS_GRIPS = listOf(
+        "4-Finger Half Crimp" to 6,
+        "Front-3 Open" to 6,
+        "Front-2 Open" to 2,
+        "Middle-2 Open" to 2,
+        "Front-2 Half Crimp" to 2,
+        "Middle-2 Half Crimp" to 2,
+    )
 
     val MAX_HANGS = ProgramDefinition(
         id = ProgramId.MAX_HANGS,
@@ -84,15 +89,21 @@ object Programs {
         hasNoTarget = false,
         usesFixedGripSequence = true,
         steps = buildList {
-            val legs = listOf(
-                NoHangsGrip.FOUR_FINGER_HALF_CRIMP to 6,
-                NoHangsGrip.FRONT_3_OPEN to 6,
-                NoHangsGrip.FRONT_2_OPEN to 2,
-                NoHangsGrip.MIDDLE_2_OPEN to 2,
-                NoHangsGrip.FRONT_2_HALF_CRIMP to 2,
-                NoHangsGrip.MIDDLE_2_HALF_CRIMP to 2,
-            )
-            legs.forEachIndexed { legIndex, (gripName, reps) ->
+            // Each grip is a leg per hand (left, then right) before moving to the next grip.
+            val legs = NO_HANGS_GRIPS.flatMap { (gripLabel, reps) ->
+                listOf(Hand.LEFT, Hand.RIGHT).map { hand -> Triple(gripLabel, hand, reps) }
+            }
+            legs.forEachIndexed { legIndex, (gripLabel, hand, reps) ->
+                // One 10s PREP per leg (not per rep) -- the grip/hand doesn't change rep to
+                // rep within a leg, so only a leg switch needs a "get into position" beat.
+                add(
+                    ProgramStep(
+                        kind = StepKind.PREP,
+                        durationSeconds = NO_HANGS_PREP_SECONDS,
+                        gripLabel = gripLabel,
+                        hand = hand,
+                    ),
+                )
                 repeat(reps) { rep ->
                     add(
                         ProgramStep(
@@ -100,12 +111,14 @@ object Programs {
                             durationSeconds = 10,
                             percentOfMax = 0.40f,
                             toleranceBandPoints = DEFAULT_TOLERANCE,
-                            gripTypeName = gripName,
-                            label = "${gripName.removePrefix("20mm ")} · ${rep + 1}/$reps",
+                            gripTypeName = "20mm $gripLabel (${hand.displayLabel})",
+                            gripLabel = gripLabel,
+                            hand = hand,
+                            label = "${rep + 1}/$reps",
                         ),
                     )
-                    val isLastRep = legIndex == legs.lastIndex && rep == reps - 1
-                    if (!isLastRep) add(ProgramStep(StepKind.REST, 20))
+                    val isLastRepOfLastLeg = legIndex == legs.lastIndex && rep == reps - 1
+                    if (!isLastRepOfLastLeg) add(ProgramStep(StepKind.REST, 20))
                 }
             }
         },
