@@ -9,6 +9,7 @@ import com.wiktor.bigbanger.ble.ProgressorBleManager
 import com.wiktor.bigbanger.ble.ScaleSource
 import com.wiktor.bigbanger.ble.SimulatedScaleSource
 import com.wiktor.bigbanger.ble.WeightSample
+import com.wiktor.bigbanger.training.ProgramDefinition
 import com.wiktor.bigbanger.training.TrainingRepo
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +58,19 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
     fun connectSimulated() {
         _activeSource.value = simulatedSource
         simulatedSource.connect(SimulatedScaleSource.FAKE_DEVICE)
+    }
+
+    /**
+     * Programs with a fixed grip sequence (e.g. No Hangs) skip the "pick a grip"
+     * screen entirely -- this makes sure each of their named grip positions
+     * exists (with a seeded placeholder max, if it has no real one yet) before
+     * the run starts. No-op for every other program.
+     */
+    fun ensureFixedGripSequenceSeeded(program: ProgramDefinition) {
+        if (!program.usesFixedGripSequence) return
+        program.steps.mapNotNull { it.gripTypeName }.distinct().forEach { name ->
+            trainingRepo.ensureGripTypeWithSeedMax(name, seedPeakKg = 1f)
+        }
     }
 
     /** Lets the Program Runner nudge the simulated signal toward the active target band; no-op on the real scale. */

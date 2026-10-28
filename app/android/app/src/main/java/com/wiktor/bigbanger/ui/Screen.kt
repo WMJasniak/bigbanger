@@ -10,7 +10,9 @@ sealed interface Screen {
     /** null program = Free Measure (the original ad-hoc scan/connect flow). */
     data class Connect(val pendingProgram: ProgramDefinition?) : Screen
     data class GripTypeSelect(val program: ProgramDefinition) : Screen
-    data class Running(val program: ProgramDefinition, val gripType: GripType) : Screen
+
+    /** [gripType] is null for a program with a fixed grip sequence (e.g. No Hangs). */
+    data class Running(val program: ProgramDefinition, val gripType: GripType?) : Screen
     data object Stats : Screen
     data object Settings : Screen
 }

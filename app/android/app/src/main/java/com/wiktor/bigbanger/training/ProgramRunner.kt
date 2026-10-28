@@ -39,7 +39,7 @@ sealed interface RunnerPhase {
  */
 class ProgramRunner(
     val program: ProgramDefinition,
-    private val currentMaxKg: Float?,
+    private val maxKgForStep: (ProgramStep) -> Float?,
     private val scope: CoroutineScope,
     private val onSetMeasuring: (Boolean) -> Unit,
     private val currentHistory: () -> List<WeightSample>,
@@ -59,7 +59,7 @@ class ProgramRunner(
     val targetRangeKg: ClosedFloatingPointRange<Float>?
         get() {
             val pct = currentStep.percentOfMax ?: return null
-            val max = currentMaxKg ?: return null
+            val max = maxKgForStep(currentStep) ?: return null
             val tol = currentStep.toleranceBandPoints
             val lo = max * (pct - tol)
             val hi = max * (pct + tol)

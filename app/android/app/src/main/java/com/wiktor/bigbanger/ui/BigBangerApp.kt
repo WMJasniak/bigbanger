@@ -66,10 +66,12 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
         Screen.Home -> HomeScreen(
             viewModel = viewModel,
             onSelectProgram = { program ->
-                screen = if (viewModel.connectionState.value is ConnectionState.Connected) {
-                    Screen.GripTypeSelect(program)
-                } else {
-                    Screen.Connect(program)
+                viewModel.ensureFixedGripSequenceSeeded(program)
+                val connected = viewModel.connectionState.value is ConnectionState.Connected
+                screen = when {
+                    !connected -> Screen.Connect(program)
+                    program.usesFixedGripSequence -> Screen.Running(program, null)
+                    else -> Screen.GripTypeSelect(program)
                 }
             },
             onFreeMeasure = { screen = Screen.Connect(null) },
@@ -83,7 +85,13 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
                 is ConnectionState.Connected -> {
                     val pending = s.pendingProgram
                     if (pending != null) {
-                        LaunchedEffect(pending) { screen = Screen.GripTypeSelect(pending) }
+                        LaunchedEffect(pending) {
+                            screen = if (pending.usesFixedGripSequence) {
+                                Screen.Running(pending, null)
+                            } else {
+                                Screen.GripTypeSelect(pending)
+                            }
+                        }
                     } else {
                         DeviceScreen(viewModel = viewModel, device = cs.device, onBack = { screen = Screen.Home })
                     }

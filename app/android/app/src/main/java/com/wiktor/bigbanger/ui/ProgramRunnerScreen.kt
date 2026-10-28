@@ -30,6 +30,7 @@ import com.wiktor.bigbanger.ble.ConnectionState
 import com.wiktor.bigbanger.training.GripType
 import com.wiktor.bigbanger.training.ProgramDefinition
 import com.wiktor.bigbanger.training.ProgramRunner
+import com.wiktor.bigbanger.training.ProgramStep
 import com.wiktor.bigbanger.training.RunnerPhase
 import com.wiktor.bigbanger.training.StepKind
 
@@ -37,15 +38,19 @@ import com.wiktor.bigbanger.training.StepKind
 fun ProgramRunnerScreen(
     viewModel: BigBangerViewModel,
     program: ProgramDefinition,
-    gripType: GripType,
+    gripType: GripType?,
     onFinished: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val currentMaxKg = remember(gripType) { viewModel.trainingRepo.currentMaxKg(gripType.id) }
     val runner = remember(program, gripType) {
         ProgramRunner(
             program = program,
-            currentMaxKg = currentMaxKg,
+            maxKgForStep = { step: ProgramStep ->
+                val fixedGripId = step.gripTypeName?.let { name ->
+                    viewModel.trainingRepo.gripTypes.value.firstOrNull { it.name == name }?.id
+                }
+                (fixedGripId ?: gripType?.id)?.let { viewModel.trainingRepo.currentMaxKg(it) }
+            },
             scope = scope,
             onSetMeasuring = { active -> if (active) viewModel.startMeasurement() else viewModel.stopMeasurement() },
             currentHistory = { viewModel.weightHistory.value },
@@ -148,7 +153,7 @@ fun ProgramRunnerScreen(
     }
 
     val decision = phase as? RunnerPhase.AwaitingAttemptDecision
-    if (decision != null) {
+    if (decision != null && gripType != null) {
         AttemptDecisionDialog(
             peakKg = decision.peakKg,
             currentMaxKg = viewModel.trainingRepo.currentMaxKg(gripType.id),

@@ -117,6 +117,19 @@ class TrainingRepo(context: Context) {
         return grip
     }
 
+    /**
+     * Looks up a grip type by exact name, creating it if missing, and seeds a
+     * [seedPeakKg] max result if it has none yet -- used by programs with a
+     * fixed grip sequence (e.g. No Hangs) so their target bands work before
+     * the user has run real Max Testing against each specific position.
+     * Never overwrites an existing max.
+     */
+    fun ensureGripTypeWithSeedMax(name: String, seedPeakKg: Float): GripType {
+        val grip = _gripTypes.value.firstOrNull { it.name == name } ?: addGripType(name)
+        if (currentMaxKg(grip.id) == null) recordMaxTest(grip.id, seedPeakKg)
+        return grip
+    }
+
     fun deleteGripType(id: String) {
         _gripTypes.update { list -> list.filterNot { it.id == id } }
         _maxResults.update { list -> list.filterNot { it.gripTypeId == id } }
