@@ -39,8 +39,8 @@ private const val STRIP_SAMPLE_STEP_SECONDS = 0.1f
 // background itself (not just the strip) signals which period you're in. Blended at a
 // low fraction into the theme's own panel color rather than used outright, since the
 // base is nearly desaturated and a pure hue rotation on it would barely show.
-private val WORK_TINT_COLOR = Color(0xFFE1551F)
-private val REST_TINT_COLOR = Color(0xFF3A7CA5)
+private val WORK_TINT_COLOR = Color(0xFFD4B106)
+private val REST_TINT_COLOR = Color(0xFF4F9D5B)
 private const val PANEL_TINT_FRACTION = 0.16f
 
 @Composable
@@ -96,15 +96,25 @@ fun ForceChart(
         val windowStart = now - windowSeconds * anchorFraction
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 
-        // Every target segment in view (not just the current one) counts toward the
-        // range, so a strip never gets clipped as it scrolls between legs with
-        // different maxes -- then a margin on top/bottom so a strip's edge, or its
-        // accent line, never sits exactly on the canvas boundary.
+        // While a real target is in view, the range is set from the target strip alone
+        // (every segment in view, not just the current one, so a strip never gets
+        // clipped scrolling between legs with different maxes) -- deliberately ignoring
+        // the live readout, so noise or overshoot doesn't make the axis keep resizing.
+        // Only without a real target (Max Testing, Raw Data) does the readout drive it,
+        // since there is nothing else to scale against.
         val targetExtremes = sortedSegments.flatMap { listOf(it.centerKg - it.halfWidthKg, it.centerKg + it.halfWidthKg) }
-        val sampleMin = visible.minOfOrNull { it.kilograms }
-        val sampleMax = visible.maxOfOrNull { it.kilograms }
-        val rawMin = (listOf(0f, sampleMin ?: 0f) + targetExtremes).min()
-        val rawMax = (listOf(rawMin + 1f, sampleMax ?: (rawMin + 1f)) + targetExtremes).max()
+        val hasRealTarget = sortedSegments.any { it.halfWidthKg > 0.01f }
+        val rawMin: Float
+        val rawMax: Float
+        if (hasRealTarget) {
+            rawMin = (listOf(0f) + targetExtremes).min()
+            rawMax = (listOf(rawMin + 1f) + targetExtremes).max()
+        } else {
+            val sampleMin = visible.minOfOrNull { it.kilograms }
+            val sampleMax = visible.maxOfOrNull { it.kilograms }
+            rawMin = listOf(0f, sampleMin ?: 0f).min()
+            rawMax = listOf(rawMin + 1f, sampleMax ?: (rawMin + 1f)).max()
+        }
         val margin = (rawMax - rawMin) * 0.08f
         val minWeight = rawMin - margin
         val maxWeight = rawMax + margin
