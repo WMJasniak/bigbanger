@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
@@ -27,7 +26,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
@@ -117,11 +115,6 @@ fun ProgramRunnerScreen(
         gripHandLabel(step)
     }
     val repCounterText = if (isRest) program.steps.getOrNull(runner.stepIndex - 1)?.label else step.label
-    val restProgress = if (step.kind == StepKind.WORK || step.durationSeconds <= 0) {
-        null
-    } else {
-        1f - (runner.remainingSeconds.toFloat() / step.durationSeconds)
-    }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         LinearProgressIndicator(
@@ -161,23 +154,28 @@ fun ProgramRunnerScreen(
                 modifier = Modifier.padding(vertical = 16.dp),
             )
         } else {
-            // Fixed width + centered so the digit count changing (e.g. 10s -> 9s)
-            // doesn't shift anything else sideways.
-            Text(
-                "${runner.remainingSeconds}s",
-                style = MaterialTheme.typography.displayMedium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.width(160.dp).padding(vertical = 16.dp),
-            )
+            // Right-aligned within the left half of the screen, so the last digit always
+            // lands exactly on the screen's horizontal middle no matter how many digits
+            // are showing -- centering the whole string instead would let that edge drift
+            // sideways between e.g. "9s" and "10s".
+            Box(modifier = Modifier.fillMaxWidth(0.5f).padding(vertical = 16.dp)) {
+                Text(
+                    "${runner.remainingSeconds}s",
+                    style = MaterialTheme.typography.displayMedium,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
+            }
         }
 
         // Always mounted (never conditionally shown/hidden) so it keeps its slot in the
-        // middle of the screen and the Pause/Cancel row below it never moves. During
-        // REST/PREP it shows a faint left-to-right wash building up to the next WORK step.
+        // middle of the screen and the Pause/Cancel row below it never moves. The target
+        // band shows continuously (falling forward to the next one during REST/PREP), and
+        // a marker at the live edge is full height while working and settles to nothing
+        // once the hold ends.
         ForceChart(
             samples = history,
-            targetRangeKg = runner.targetRangeKg,
-            restProgress = restProgress,
+            targetRangeKg = runner.displayTargetRangeKg,
+            isWorking = step.kind == StepKind.WORK,
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
 

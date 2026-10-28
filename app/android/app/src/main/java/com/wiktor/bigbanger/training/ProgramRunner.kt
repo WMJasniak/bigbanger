@@ -56,15 +56,25 @@ class ProgramRunner(
 
     val currentStep: ProgramStep get() = program.steps[stepIndex]
 
-    val targetRangeKg: ClosedFloatingPointRange<Float>?
-        get() {
-            val pct = currentStep.percentOfMax ?: return null
-            val max = maxKgForStep(currentStep) ?: return null
-            val tol = currentStep.toleranceBandPoints
-            val lo = max * (pct - tol)
-            val hi = max * (pct + tol)
-            return if (lo <= hi) lo..hi else hi..lo
-        }
+    private fun bandFor(step: ProgramStep): ClosedFloatingPointRange<Float>? {
+        val pct = step.percentOfMax ?: return null
+        val max = maxKgForStep(step) ?: return null
+        val tol = step.toleranceBandPoints
+        val lo = max * (pct - tol)
+        val hi = max * (pct + tol)
+        return if (lo <= hi) lo..hi else hi..lo
+    }
+
+    /** The real target for the current step only -- what the simulator should chase. */
+    val targetRangeKg: ClosedFloatingPointRange<Float>? get() = bandFor(currentStep)
+
+    /**
+     * Same band, but falls forward to the next step that has one (e.g. during REST/PREP,
+     * which never carry a target of their own) so the chart's target band stays visible
+     * continuously instead of disappearing outside WORK steps.
+     */
+    val displayTargetRangeKg: ClosedFloatingPointRange<Float>?
+        get() = (stepIndex until program.steps.size).firstNotNullOfOrNull { bandFor(program.steps[it]) }
 
     fun start() = runStep()
 

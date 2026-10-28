@@ -1,9 +1,14 @@
 package com.wiktor.bigbanger.ui
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -14,6 +19,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.wiktor.bigbanger.ble.WeightSample
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 /** Fixed scrolling window, not "stretch to fit all data so far" -- the latter made the
  * whole trace visibly compress on every new sample, which read as choppy/jittery. */
@@ -23,10 +30,10 @@ private const val DEFAULT_WINDOW_SECONDS = 12f
 fun ForceChart(
     samples: List<WeightSample>,
     targetRangeKg: ClosedFloatingPointRange<Float>? = null,
-    /** 0f..1f while idle (REST/PREP): a faint left-to-right wash + edge line building up
-     * toward the next WORK step, so the chart stays mounted and useful between holds
-     * instead of appearing/disappearing (which was shifting the rest of the layout). */
-    restProgress: Float? = null,
+    /** True while a WORK step is actively measuring. Drives a vertical marker at the
+     * live edge: full height while working, animating down to nothing once it stops --
+     * so it reads as a pulse settling, not an abrupt cut. */
+    isWorking: Boolean = false,
     windowSeconds: Float = DEFAULT_WINDOW_SECONDS,
     modifier: Modifier = Modifier,
 ) {
@@ -35,11 +42,26 @@ fun ForceChart(
     val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
     val bandFillColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
     val bandEdgeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+    val markerHeightFraction by animateFloatAsState(targetValue = if (isWorking) 1f else 0f, label = "forceChartMarker")
+
+    // Keeps the window scrolling at a real-time pace even with no new samples (e.g.
+    // during REST/PREP, when nothing is being measured) instead of freezing on the last
+    // sample's device timestamp. Resets to 0 every time a genuinely new sample arrives.
+    val lastSample = samples.lastOrNull()
+    val idleElapsedSeconds = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(lastSample) {
+        idleElapsedSeconds.floatValue = 0f
+        val startNanos = System.nanoTime()
+        while (isActive) {
+            delay(100)
+            idleElapsedSeconds.floatValue = (System.nanoTime() - startNanos) / 1_000_000_000f
+        }
+    }
 
     Canvas(modifier = modifier.fillMaxSize()) {
         drawRoundRect(color = panelColor, cornerRadius = CornerRadius(20f, 20f))
 
-        val latestTime = samples.lastOrNull()?.timestampSeconds ?: 0f
+        val latestTime = (lastSample?.timestampSeconds ?: 0f) + idleElapsedSeconds.floatValue
         val windowStart = (latestTime - windowSeconds).coerceAtLeast(0f)
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 
@@ -74,10 +96,15 @@ fun ForceChart(
             drawLine(bandEdgeColor, Offset(0f, bottom), Offset(size.width, bottom), strokeWidth = 2f)
         }
 
-        restProgress?.let { progress ->
-            val x = (size.width * progress).coerceIn(0f, size.width)
-            drawRect(color = lineColor.copy(alpha = 0.10f), topLeft = Offset(0f, 0f), size = Size(x, size.height))
-            drawLine(lineColor.copy(alpha = 0.45f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 3f)
+        if (markerHeightFraction > 0.01f) {
+            val markerX = xOf(latestTime)
+            val markerHeight = size.height * markerHeightFraction
+            drawLine(
+                lineColor.copy(alpha = 0.5f),
+                Offset(markerX, size.height),
+                Offset(markerX, size.height - markerHeight),
+                strokeWidth = 6f,
+            )
         }
 
         if (visible.size >= 2) {
