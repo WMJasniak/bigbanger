@@ -45,3 +45,19 @@ data class ProgramDefinition(
     val hasNoTarget: Boolean,
     val steps: List<ProgramStep>,
 )
+
+/**
+ * A program's user-adjustable sets/reps and timing, set via its own settings screen
+ * (see ui/ProgramGripConfigScreen.kt) and fed into [Programs]' per-program build
+ * functions to produce the steps actually run. [reps] means something slightly
+ * different per program -- reps per grip for Max Hangs, attempts per grip for Max
+ * Testing, ramp repeats (sets) for Warm Up, and reps per grip for No Hangs where 0 is a
+ * sentinel for "use the Abrahangs protocol's own per-grip rep counts" instead of a
+ * single uniform number. [workSeconds]/[restSeconds] are a hold's duration and the rest
+ * between them; see [Programs.defaultTimingFor] for each program's defaults.
+ */
+data class ProgramTiming(
+    val reps: Int,
+    val workSeconds: Int,
+    val restSeconds: Int,
+)

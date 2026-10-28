@@ -53,13 +53,16 @@ sealed interface RunnerPhase {
  * and driven by the caller's CoroutineScope (cancelled when it leaves
  * composition), matching the house style (see Morse's Repo/MorsePlayer).
  *
- * Measurement runs continuously for the whole program, started once in
- * [start] and stopped only on [cancel]/[finishEarly]/natural completion --
- * not restarted per WORK step -- so the live force trace keeps plotting
- * through REST/PREP too, instead of going blank between holds. A no-target
- * WORK step's peak is scoped to just its own hold by filtering on
- * [stepStartTimestampSeconds] rather than by relying on history being empty
- * at the start of the step.
+ * Measurement runs continuously through every WORK/REST/PREP step, resumed at the top
+ * of [runStep] and stopped only on [cancel]/[finishEarly]/natural completion -- so the
+ * live force trace keeps plotting through REST/PREP too, instead of going blank
+ * between holds. The one exception is [RunnerPhase.AwaitingAttemptDecision]: measurement
+ * pauses there (nothing left to measure while the user decides what to do with the
+ * attempt that just ended) and resumes whichever way the decision is left --
+ * [resolveAttempt] advancing to the next step, or [retryAttempt] redoing this one -- both
+ * of which go through [runStep]. A no-target WORK step's peak is scoped to just its own
+ * hold by filtering on [stepStartTimestampSeconds] rather than by relying on history
+ * being empty at the start of the step.
  */
 class ProgramRunner(
     val program: ProgramDefinition,
@@ -157,7 +160,6 @@ class ProgramRunner(
     }
 
     fun start() {
-        onSetMeasuring(true)
         runStep()
     }
 
@@ -221,6 +223,7 @@ class ProgramRunner(
 
     private fun runStep() {
         tickJob?.cancel()
+        onSetMeasuring(true)
         remainingSeconds = currentStep.durationSeconds
         stepStartTimestampSeconds = currentHistory().lastOrNull()?.timestampSeconds ?: 0f
         phase = RunnerPhase.Running
@@ -245,6 +248,11 @@ class ProgramRunner(
             val peak = currentHistory()
                 .filter { it.timestampSeconds >= stepStartTimestampSeconds }
                 .maxOfOrNull { it.kilograms } ?: 0f
+            // Nothing meaningful to measure while the user decides what to do with this
+            // attempt -- otherwise the chart kept scrolling/plotting behind the decision
+            // dialog for however long that took. runStep() resumes it for the next step,
+            // whichever path gets there (resolveAttempt or retryAttempt).
+            onSetMeasuring(false)
             phase = RunnerPhase.AwaitingAttemptDecision(peak)
             return
         }

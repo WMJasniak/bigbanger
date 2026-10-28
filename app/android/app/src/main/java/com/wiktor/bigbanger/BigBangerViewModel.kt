@@ -13,7 +13,6 @@ import com.wiktor.bigbanger.training.ProgramDefinition
 import com.wiktor.bigbanger.training.ProgramId
 import com.wiktor.bigbanger.training.Programs
 import com.wiktor.bigbanger.training.TrainingRepo
-import com.wiktor.bigbanger.training.expandWithGripSequence
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -90,10 +89,12 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
             trainingRepo.holdTypes.value.firstOrNull { it.id == variant.holdTypeId }?.let { it to variant }
         }
         if (legs.isEmpty()) return null
-        return if (program.id == ProgramId.NO_HANGS) {
-            Programs.buildNoHangs(legs)
-        } else {
-            expandWithGripSequence(program, legs)
+        val timing = trainingRepo.timingFor(program.id)
+        return when (program.id) {
+            ProgramId.NO_HANGS -> Programs.buildNoHangs(legs, timing)
+            ProgramId.MAX_HANGS -> Programs.expandWithGripSequence(Programs.buildMaxHangsBase(timing), legs)
+            ProgramId.MAX_TESTING -> Programs.expandWithGripSequence(Programs.buildMaxTestingBase(timing), legs)
+            ProgramId.WARM_UP -> Programs.expandWithGripSequence(Programs.buildWarmUpBase(timing), legs)
         }
     }
 

@@ -61,6 +61,11 @@ fun ForceChart(
     /** true = tint the panel warm (actively working), false = tint it cool (resting/
      * prepping), null = no tint (plain reading, e.g. Raw Data, where neither applies). */
     isWorking: Boolean? = null,
+    /** true pins the view to the last real sample instead of idling forward in real
+     * time -- used while a decision dialog sits over the chart (e.g. Max Testing's
+     * attempt result) so the trace underneath stays visibly still, not scrolling with
+     * no new data to show for it. */
+    frozen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val basePanelColor = MaterialTheme.colorScheme.surfaceVariant
@@ -96,7 +101,7 @@ fun ForceChart(
     Canvas(modifier = modifier.fillMaxSize().clipToBounds()) {
         drawRoundRect(color = panelColor, cornerRadius = CornerRadius(20f, 20f))
 
-        val now = (lastSample?.timestampSeconds ?: 0f) + idleElapsedSeconds.floatValue
+        val now = (lastSample?.timestampSeconds ?: 0f) + (if (frozen) 0f else idleElapsedSeconds.floatValue)
         val windowStart = now - windowSeconds * anchorFraction
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 
@@ -123,10 +128,14 @@ fun ForceChart(
             rawMin = -half
             rawMax = (legCenter!! + half).coerceAtLeast(rawMin + 0.05f)
         } else {
+            // A tiny epsilon floor, not a forced 1kg-tall axis -- small real readings
+            // (an idle/untared raw trace, or a light Max Testing peak) were getting
+            // squashed into the bottom sliver of a much taller axis and reading as
+            // "not plotted".
             val sampleMin = visible.minOfOrNull { it.kilograms }
             val sampleMax = visible.maxOfOrNull { it.kilograms }
             rawMin = listOf(0f, sampleMin ?: 0f).min()
-            rawMax = listOf(rawMin + 1f, sampleMax ?: (rawMin + 1f)).max()
+            rawMax = listOf(rawMin + 0.05f, sampleMax ?: (rawMin + 0.05f)).max()
         }
         // Even margin on both sides: the same distance from the work target's top to
         // the graph's top as from the rest level's bottom to the graph's bottom.

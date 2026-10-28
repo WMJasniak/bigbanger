@@ -40,6 +40,11 @@ class TrainingRepo(context: Context) {
     private val _programGripSequences = MutableStateFlow<Map<ProgramId, List<String>>>(emptyMap())
     val programGripSequences = _programGripSequences.asStateFlow()
 
+    /** Per-program sets/reps and work/rest timing -- see [ProgramTiming]. Missing from
+     * the map means "use that program's own default" ([Programs.defaultTimingFor]). */
+    private val _programTiming = MutableStateFlow<Map<ProgramId, ProgramTiming>>(emptyMap())
+    val programTiming = _programTiming.asStateFlow()
+
     fun load() {
         if (!file.exists()) return
         try {
@@ -84,6 +89,17 @@ class TrainingRepo(context: Context) {
                 val programId = runCatching { ProgramId.valueOf(key) }.getOrNull() ?: return@mapNotNull null
                 val ids = sequences.getJSONArray(key)
                 programId to (0 until ids.length()).map { ids.getString(it) }
+            }?.toMap() ?: emptyMap()
+
+            val timing = root.optJSONObject("programTiming")
+            _programTiming.value = timing?.keys()?.asSequence()?.mapNotNull { key ->
+                val programId = runCatching { ProgramId.valueOf(key) }.getOrNull() ?: return@mapNotNull null
+                val t = timing.getJSONObject(key)
+                programId to ProgramTiming(
+                    reps = t.getInt("reps"),
+                    workSeconds = t.getInt("workSeconds"),
+                    restSeconds = t.getInt("restSeconds"),
+                )
             }?.toMap() ?: emptyMap()
         } catch (_: Exception) {
             // Corrupt or unreadable state: start fresh rather than crash.
@@ -143,6 +159,20 @@ class TrainingRepo(context: Context) {
                         }
                     },
                 )
+                put(
+                    "programTiming",
+                    JSONObject().apply {
+                        _programTiming.value.forEach { (programId, timing) ->
+                            put(
+                                programId.name,
+                                JSONObject()
+                                    .put("reps", timing.reps)
+                                    .put("workSeconds", timing.workSeconds)
+                                    .put("restSeconds", timing.restSeconds),
+                            )
+                        }
+                    },
+                )
             }
             file.writeText(root.toString())
         } catch (_: Exception) {
@@ -189,6 +219,14 @@ class TrainingRepo(context: Context) {
 
     fun setGripSequence(programId: ProgramId, variantIds: List<String>) {
         _programGripSequences.update { it + (programId to variantIds) }
+        save()
+    }
+
+    /** A program's configured sets/reps and timing, or its own default if never changed. */
+    fun timingFor(programId: ProgramId): ProgramTiming = _programTiming.value[programId] ?: Programs.defaultTimingFor(programId)
+
+    fun setTiming(programId: ProgramId, timing: ProgramTiming) {
+        _programTiming.update { it + (programId to timing) }
         save()
     }
 

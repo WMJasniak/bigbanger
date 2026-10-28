@@ -187,6 +187,7 @@ fun ProgramRunnerScreen(
             anchorFraction = 1f / 3f,
             windowSeconds = RUNNER_CHART_WINDOW_SECONDS,
             isWorking = step.kind == StepKind.WORK,
+            frozen = phase is RunnerPhase.AwaitingAttemptDecision,
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
 
