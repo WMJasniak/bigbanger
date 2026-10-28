@@ -100,14 +100,17 @@ fun ForceChart(
         val windowStart = now - windowSeconds * anchorFraction
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 
-        // While a real target is in view, the range is set from the target strip alone
-        // (every segment in view, not just the current one, so a strip never gets
-        // clipped scrolling between legs with different maxes) -- deliberately ignoring
-        // the live readout, so noise or overshoot doesn't make the axis keep resizing.
-        // Only without a real target (Max Testing, Raw Data) does the readout drive it,
-        // since there is nothing else to scale against.
-        val targetExtremes = sortedSegments.flatMap { listOf(it.centerKg - it.halfWidthKg, it.centerKg + it.halfWidthKg) }
-        val hasRealTarget = sortedSegments.any { it.halfWidthKg > 0.01f }
+        // While a real target is in view, the range is set from the *current* segment's
+        // band alone -- not every segment in the window -- so a neighboring leg with a
+        // much higher or lower max (a different grip/hand) doesn't stretch the axis and
+        // leave a huge gap above the band actually in front of you right now. Past/future
+        // segments still render (and scroll, and clip at the edge) at whatever size they
+        // really are. Deliberately ignores the live readout too, so noise or overshoot
+        // doesn't make the axis keep resizing. Only without a real target (Max Testing,
+        // Raw Data) does the readout drive it, since there is nothing else to scale against.
+        val currentSegment = sortedSegments.firstOrNull { it.startOffsetSeconds <= 0f && it.endOffsetSeconds > 0f }
+        val targetExtremes = currentSegment?.let { listOf(it.centerKg - it.halfWidthKg, it.centerKg + it.halfWidthKg) } ?: emptyList()
+        val hasRealTarget = (currentSegment?.halfWidthKg ?: 0f) > 0.01f
         val rawMin: Float
         val rawMax: Float
         if (hasRealTarget) {
@@ -174,8 +177,8 @@ fun ForceChart(
             fillPath.close()
 
             drawPath(path = fillPath, color = bandFillColor)
-            drawPath(path = topEdgePath, color = bandEdgeColor, style = Stroke(width = 2f))
-            drawPath(path = bottomEdgePath, color = bandEdgeColor, style = Stroke(width = 2f))
+            drawPath(path = topEdgePath, color = bandEdgeColor, style = Stroke(width = 5f, join = StrokeJoin.Round))
+            drawPath(path = bottomEdgePath, color = bandEdgeColor, style = Stroke(width = 5f, join = StrokeJoin.Round))
         }
 
         if (visible.size >= 2) {
