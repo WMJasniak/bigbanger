@@ -103,6 +103,7 @@ fun ForceChart(
             val timeStart = -windowSeconds * anchorFraction
             val timeEnd = windowSeconds * (1f - anchorFraction)
             val topEdgePath = Path()
+            val bottomEdgePath = Path()
             val fillPath = Path()
             val bottomPoints = ArrayList<Offset>((((timeEnd - timeStart) / STRIP_SAMPLE_STEP_SECONDS) + 2).toInt())
             var started = false
@@ -114,10 +115,12 @@ fun ForceChart(
                 val bottomY = yOf(center - half)
                 if (!started) {
                     topEdgePath.moveTo(x, topY)
+                    bottomEdgePath.moveTo(x, bottomY)
                     fillPath.moveTo(x, topY)
                     started = true
                 } else {
                     topEdgePath.lineTo(x, topY)
+                    bottomEdgePath.lineTo(x, bottomY)
                     fillPath.lineTo(x, topY)
                 }
                 bottomPoints.add(Offset(x, bottomY))
@@ -128,6 +131,7 @@ fun ForceChart(
 
             drawPath(path = fillPath, color = bandFillColor)
             drawPath(path = topEdgePath, color = bandEdgeColor, style = Stroke(width = 2f))
+            drawPath(path = bottomEdgePath, color = bandEdgeColor, style = Stroke(width = 2f))
         }
 
         if (visible.size >= 2) {

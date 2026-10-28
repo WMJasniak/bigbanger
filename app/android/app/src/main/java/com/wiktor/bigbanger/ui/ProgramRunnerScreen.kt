@@ -3,13 +3,11 @@ package com.wiktor.bigbanger.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -21,14 +19,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
@@ -160,21 +157,12 @@ fun ProgramRunnerScreen(
                 modifier = Modifier.padding(vertical = 16.dp),
             )
         } else {
-            // The text's own width is measured and used to offset it, so its right edge
-            // lands exactly on the container's horizontal middle no matter how many
-            // digits are showing -- a fractional-width box wasn't landing there reliably.
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
-                var textWidthPx by remember { mutableIntStateOf(0) }
-                val density = LocalDensity.current
-                Text(
-                    "${runner.remainingSeconds}s",
-                    style = MaterialTheme.typography.displayMedium,
-                    onTextLayout = { textWidthPx = it.size.width },
-                    modifier = Modifier.offset(
-                        x = with(density) { (constraints.maxWidth / 2 - textWidthPx).toDp() },
-                    ),
-                )
-            }
+            Text(
+                "${runner.remainingSeconds}s",
+                style = MaterialTheme.typography.displayMedium,
+                textAlign = TextAlign.End,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+            )
         }
 
         // Always mounted (never conditionally shown/hidden) so it keeps its slot in the

@@ -94,9 +94,19 @@ class ProgramRunner(
      * countdown, so the two scroll in lockstep instead of drifting apart.
      */
     fun targetTimeline(pastSeconds: Float, futureSeconds: Float, nowTimestampSeconds: Float): List<TargetSegment> {
-        fun centerAndHalf(step: ProgramStep, fallbackHalf: Float): Pair<Float, Float> {
-            val band = bandFor(step) ?: return 0f to fallbackHalf
-            return (band.start + band.endInclusive) / 2f to (band.endInclusive - band.start) / 2f
+        fun centerOf(step: ProgramStep): Float = bandFor(step)?.let { (it.start + it.endInclusive) / 2f } ?: 0f
+        fun halfWidthOf(step: ProgramStep): Float = bandFor(step)?.let { (it.endInclusive - it.start) / 2f } ?: 0f
+
+        // A REST/PREP step has no band of its own: borrow one from whichever neighbor
+        // actually has it. REST borrows from the WORK step it just finished (the one
+        // before it); PREP borrows from the WORK step it's about to start (the one
+        // after it) -- looking the other way would show the wrong leg's width for a
+        // program with a fixed grip sequence, where neighboring legs differ.
+        fun resolvedHalf(index: Int): Float {
+            val step = program.steps[index]
+            if (bandFor(step) != null) return halfWidthOf(step)
+            val neighborIndex = if (step.kind == StepKind.REST) index - 1 else index + 1
+            return program.steps.getOrNull(neighborIndex)?.let(::halfWidthOf) ?: 0f
         }
 
         val elapsed = (nowTimestampSeconds - stepStartTimestampSeconds)
@@ -104,31 +114,24 @@ class ProgramRunner(
         val remaining = currentStep.durationSeconds - elapsed
 
         val segments = mutableListOf<TargetSegment>()
-        val (curCenter, curHalf) = centerAndHalf(currentStep, 0f)
-        segments.add(TargetSegment(-elapsed, remaining, curCenter, curHalf))
+        segments.add(TargetSegment(-elapsed, remaining, centerOf(currentStep), resolvedHalf(stepIndex)))
 
-        var halfCursor = curHalf
         var cursor = -elapsed
         var i = stepIndex - 1
         while (cursor > -pastSeconds && i >= 0) {
             val step = program.steps[i]
             val start = cursor - step.durationSeconds
-            val (center, half) = centerAndHalf(step, halfCursor)
-            halfCursor = half
-            segments.add(TargetSegment(start, cursor, center, half))
+            segments.add(TargetSegment(start, cursor, centerOf(step), resolvedHalf(i)))
             cursor = start
             i -= 1
         }
 
-        halfCursor = curHalf
         cursor = remaining
         i = stepIndex + 1
         while (cursor < futureSeconds && i < program.steps.size) {
             val step = program.steps[i]
             val end = cursor + step.durationSeconds
-            val (center, half) = centerAndHalf(step, halfCursor)
-            halfCursor = half
-            segments.add(TargetSegment(cursor, end, center, half))
+            segments.add(TargetSegment(cursor, end, centerOf(step), resolvedHalf(i)))
             cursor = end
             i += 1
         }
