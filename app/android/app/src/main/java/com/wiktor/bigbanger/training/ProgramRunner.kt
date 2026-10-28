@@ -16,12 +16,19 @@ import kotlinx.coroutines.launch
  * describe a band of constant thickness that moves between the WORK target level and
  * zero for REST/PREP, rather than appearing/disappearing or changing thickness --
  * [ui.ForceChart] then smooths the handoff between adjacent segments itself.
+ *
+ * [legCenterKg] is this segment's leg's *real* WORK level regardless of the segment's
+ * own kind -- unlike [centerKg], it does not drop to zero for REST/PREP -- so the
+ * chart's y-axis can stay fixed to "this leg's work level and zero" across a work/rest
+ * transition instead of jumping between them. Null if the leg has no real target at
+ * all (e.g. Max Testing).
  */
 data class TargetSegment(
     val startOffsetSeconds: Float,
     val endOffsetSeconds: Float,
     val centerKg: Float,
     val halfWidthKg: Float,
+    val legCenterKg: Float?,
 )
 
 sealed interface RunnerPhase {
@@ -109,19 +116,29 @@ class ProgramRunner(
             return program.steps.getOrNull(neighborIndex)?.let(::halfWidthOf) ?: 0f
         }
 
+        fun resolvedLegCenter(index: Int): Float? {
+            val step = program.steps[index]
+            bandFor(step)?.let { return (it.start + it.endInclusive) / 2f }
+            val neighborIndex = if (step.kind == StepKind.REST) index - 1 else index + 1
+            val neighbor = program.steps.getOrNull(neighborIndex) ?: return null
+            return bandFor(neighbor)?.let { (it.start + it.endInclusive) / 2f }
+        }
+
         val elapsed = (nowTimestampSeconds - stepStartTimestampSeconds)
             .coerceIn(0f, currentStep.durationSeconds.toFloat())
         val remaining = currentStep.durationSeconds - elapsed
 
         val segments = mutableListOf<TargetSegment>()
-        segments.add(TargetSegment(-elapsed, remaining, centerOf(currentStep), resolvedHalf(stepIndex)))
+        segments.add(
+            TargetSegment(-elapsed, remaining, centerOf(currentStep), resolvedHalf(stepIndex), resolvedLegCenter(stepIndex)),
+        )
 
         var cursor = -elapsed
         var i = stepIndex - 1
         while (cursor > -pastSeconds && i >= 0) {
             val step = program.steps[i]
             val start = cursor - step.durationSeconds
-            segments.add(TargetSegment(start, cursor, centerOf(step), resolvedHalf(i)))
+            segments.add(TargetSegment(start, cursor, centerOf(step), resolvedHalf(i), resolvedLegCenter(i)))
             cursor = start
             i -= 1
         }
@@ -131,7 +148,7 @@ class ProgramRunner(
         while (cursor < futureSeconds && i < program.steps.size) {
             val step = program.steps[i]
             val end = cursor + step.durationSeconds
-            segments.add(TargetSegment(cursor, end, centerOf(step), resolvedHalf(i)))
+            segments.add(TargetSegment(cursor, end, centerOf(step), resolvedHalf(i), resolvedLegCenter(i)))
             cursor = end
             i += 1
         }

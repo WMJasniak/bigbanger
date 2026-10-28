@@ -100,38 +100,39 @@ fun ForceChart(
         val windowStart = now - windowSeconds * anchorFraction
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 
-        // While a real target is in view, the range is set from the *current* segment's
-        // band alone -- not every segment in the window -- so a neighboring leg with a
-        // much higher or lower max (a different grip/hand) doesn't stretch the axis and
-        // leave a huge gap above the band actually in front of you right now. Past/future
-        // segments still render (and scroll, and clip at the edge) at whatever size they
-        // really are. Deliberately ignores the live readout too, so noise or overshoot
-        // doesn't make the axis keep resizing. Only without a real target (Max Testing,
-        // Raw Data) does the readout drive it, since there is nothing else to scale against.
+        // While a real target is in view, the range is fixed to "this leg's work level
+        // and zero" -- using legCenterKg (the leg's real level regardless of whether
+        // this exact segment is WORK or REST/PREP) rather than the displayed centerKg
+        // (which drops to zero for REST/PREP) -- so the axis does not jump every time
+        // the current step switches between work and rest. It is still scoped to just
+        // the current leg, not a neighboring one with a different max: legCenterKg is
+        // only ever borrowed from this same leg's own WORK step. Deliberately ignores
+        // the live readout too, so noise or overshoot doesn't make the axis keep
+        // resizing. Only without a real target (Max Testing, Raw Data) does the
+        // readout drive it, since there is nothing else to scale against.
         val currentSegment = sortedSegments.firstOrNull { it.startOffsetSeconds <= 0f && it.endOffsetSeconds > 0f }
-        val targetExtremes = currentSegment?.let { listOf(it.centerKg - it.halfWidthKg, it.centerKg + it.halfWidthKg) } ?: emptyList()
-        val hasRealTarget = (currentSegment?.halfWidthKg ?: 0f) > 0.01f
+        val legCenter = currentSegment?.legCenterKg
+        val half = currentSegment?.halfWidthKg ?: 0f
+        val hasRealTarget = legCenter != null && half > 0.01f
         val rawMin: Float
         val rawMax: Float
         if (hasRealTarget) {
-            // A tiny epsilon floor only, to avoid a zero-span range -- not a full
-            // kilogram: that was silently forcing at least a 1kg-tall axis regardless
-            // of how small the real band actually is (e.g. a 1kg placeholder max makes
-            // for a band well under 1kg), which is what actually produced the huge gap
-            // above the band, not neighboring legs.
-            rawMin = (listOf(0f) + targetExtremes).min()
-            rawMax = (listOf(rawMin + 0.05f) + targetExtremes).max()
+            // Work band top is legCenter+half; rest band bottom is 0-half -- the rest
+            // bottom always is the overall floor and the work top always is the overall
+            // ceiling, since legCenter is never negative.
+            rawMin = -half
+            rawMax = (legCenter!! + half).coerceAtLeast(rawMin + 0.05f)
         } else {
             val sampleMin = visible.minOfOrNull { it.kilograms }
             val sampleMax = visible.maxOfOrNull { it.kilograms }
             rawMin = listOf(0f, sampleMin ?: 0f).min()
             rawMax = listOf(rawMin + 1f, sampleMax ?: (rawMin + 1f)).max()
         }
-        // Less headroom above the target's own top than below it -- the ceiling above
-        // the band matters far less than the baseline/zero context underneath it.
-        val range = rawMax - rawMin
-        val minWeight = rawMin - range * 0.08f
-        val maxWeight = rawMax + range * 0.03f
+        // Even margin on both sides: the same distance from the work target's top to
+        // the graph's top as from the rest level's bottom to the graph's bottom.
+        val margin = (rawMax - rawMin) * 0.08f
+        val minWeight = rawMin - margin
+        val maxWeight = rawMax + margin
 
         fun yOf(kg: Float) = size.height - (kg - minWeight) / (maxWeight - minWeight) * size.height
 
