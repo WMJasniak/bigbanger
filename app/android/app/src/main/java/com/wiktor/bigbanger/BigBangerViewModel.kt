@@ -61,16 +61,24 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /**
-     * Programs with a fixed grip sequence (e.g. No Hangs) skip the "pick a grip"
-     * screen entirely -- this makes sure each of their named grip positions
-     * exists (with a seeded placeholder max, if it has no real one yet) before
-     * the run starts. No-op for every other program.
+     * Programs with a fixed grip sequence (e.g. No Hangs) skip the "pick a hold,
+     * grip and hand" screens entirely -- this makes sure each of their named
+     * hold/grip/hand positions exists (with a seeded placeholder max, if it has
+     * no real one yet) before the run starts. No-op for every other program.
      */
     fun ensureFixedGripSequenceSeeded(program: ProgramDefinition) {
         if (!program.usesFixedGripSequence) return
-        program.steps.mapNotNull { it.gripTypeName }.distinct().forEach { name ->
-            trainingRepo.ensureGripTypeWithSeedMax(name, seedPeakKg = 1f)
-        }
+        program.steps
+            .filter { it.holdTypeName != null && it.gripLabel != null && it.hand != null }
+            .distinctBy { Triple(it.holdTypeName, it.gripLabel, it.hand) }
+            .forEach { step ->
+                trainingRepo.ensureGripVariantWithSeedMax(
+                    holdTypeName = step.holdTypeName!!,
+                    variantName = step.gripLabel!!,
+                    hand = step.hand!!,
+                    seedPeakKg = 1f,
+                )
+            }
     }
 
     /** Lets the Program Runner nudge the simulated signal toward the active target band; no-op on the real scale. */

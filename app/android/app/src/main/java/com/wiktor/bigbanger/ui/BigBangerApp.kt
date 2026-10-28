@@ -70,8 +70,8 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
                 val connected = viewModel.connectionState.value is ConnectionState.Connected
                 screen = when {
                     !connected -> Screen.Connect(program)
-                    program.usesFixedGripSequence -> Screen.Running(program, null)
-                    else -> Screen.GripTypeSelect(program)
+                    program.usesFixedGripSequence -> Screen.Running(program, null, null)
+                    else -> Screen.HoldTypeSelect(program)
                 }
             },
             onFreeMeasure = { screen = Screen.Connect(null) },
@@ -87,9 +87,9 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
                     if (pending != null) {
                         LaunchedEffect(pending) {
                             screen = if (pending.usesFixedGripSequence) {
-                                Screen.Running(pending, null)
+                                Screen.Running(pending, null, null)
                             } else {
-                                Screen.GripTypeSelect(pending)
+                                Screen.HoldTypeSelect(pending)
                             }
                         }
                     } else {
@@ -104,17 +104,26 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
             }
         }
 
-        is Screen.GripTypeSelect -> GripTypeSelectScreen(
+        is Screen.HoldTypeSelect -> HoldTypeSelectScreen(
             viewModel = viewModel,
             program = s.program,
             onBack = { screen = Screen.Home },
-            onSelect = { grip -> screen = Screen.Running(s.program, grip) },
+            onSelect = { holdType -> screen = Screen.GripVariantSelect(s.program, holdType) },
+        )
+
+        is Screen.GripVariantSelect -> GripVariantSelectScreen(
+            viewModel = viewModel,
+            program = s.program,
+            holdType = s.holdType,
+            onBack = { screen = Screen.HoldTypeSelect(s.program) },
+            onSelect = { variant, hand -> screen = Screen.Running(s.program, variant, hand) },
         )
 
         is Screen.Running -> ProgramRunnerScreen(
             viewModel = viewModel,
             program = s.program,
-            gripType = s.gripType,
+            gripVariant = s.gripVariant,
+            selectedHand = s.hand,
             onFinished = { screen = Screen.Home },
         )
 

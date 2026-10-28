@@ -30,7 +30,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
 import com.wiktor.bigbanger.ble.ConnectionState
-import com.wiktor.bigbanger.training.GripType
+import com.wiktor.bigbanger.training.GripVariant
+import com.wiktor.bigbanger.training.Hand
 import com.wiktor.bigbanger.training.ProgramDefinition
 import com.wiktor.bigbanger.training.ProgramRunner
 import com.wiktor.bigbanger.training.ProgramStep
@@ -44,18 +45,26 @@ private const val RUNNER_CHART_WINDOW_SECONDS = 30f
 fun ProgramRunnerScreen(
     viewModel: BigBangerViewModel,
     program: ProgramDefinition,
-    gripType: GripType?,
+    gripVariant: GripVariant?,
+    selectedHand: Hand?,
     onFinished: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val runner = remember(program, gripType) {
+    val runner = remember(program, gripVariant, selectedHand) {
         ProgramRunner(
             program = program,
             maxKgForStep = { step: ProgramStep ->
-                val fixedGripId = step.gripTypeName?.let { name ->
-                    viewModel.trainingRepo.gripTypes.value.firstOrNull { it.name == name }?.id
+                val fixedVariantId = if (step.holdTypeName != null && step.gripLabel != null) {
+                    val holdType = viewModel.trainingRepo.holdTypes.value.firstOrNull { it.name == step.holdTypeName }
+                    holdType?.let { ht ->
+                        viewModel.trainingRepo.gripVariants.value.firstOrNull { it.holdTypeId == ht.id && it.name == step.gripLabel }
+                    }?.id
+                } else {
+                    null
                 }
-                (fixedGripId ?: gripType?.id)?.let { viewModel.trainingRepo.currentMaxKg(it) }
+                val hand = step.hand ?: selectedHand
+                val variantId = fixedVariantId ?: gripVariant?.id
+                if (variantId != null && hand != null) viewModel.trainingRepo.currentMaxKg(variantId, hand) else null
             },
             scope = scope,
             onSetMeasuring = { active -> if (active) viewModel.startMeasurement() else viewModel.stopMeasurement() },
@@ -201,12 +210,14 @@ fun ProgramRunnerScreen(
     }
 
     val decision = phase as? RunnerPhase.AwaitingAttemptDecision
-    if (decision != null && gripType != null) {
+    if (decision != null && gripVariant != null && selectedHand != null) {
         AttemptDecisionDialog(
             peakKg = decision.peakKg,
-            currentMaxKg = viewModel.trainingRepo.currentMaxKg(gripType.id),
+            currentMaxKg = viewModel.trainingRepo.currentMaxKg(gripVariant.id, selectedHand),
             onSave = {
-                runner.resolveAttempt(save = true) { peak -> viewModel.trainingRepo.recordMaxTest(gripType.id, peak) }
+                runner.resolveAttempt(save = true) { peak ->
+                    viewModel.trainingRepo.recordMaxTest(gripVariant.id, selectedHand, peak)
+                }
             },
             onRetry = { runner.retryAttempt() },
             onSkip = { runner.resolveAttempt(save = false) {} },

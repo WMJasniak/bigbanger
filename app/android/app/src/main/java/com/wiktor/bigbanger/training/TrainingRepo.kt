@@ -10,9 +10,10 @@ import java.io.File
 import java.util.UUID
 
 /**
- * Grip types, max-test history, and a session log, persisted as one JSON
- * snapshot in app-private storage (house style -- see update/Updater.kt's
- * UpdateSettings and the sibling Morse app's Repo.kt; no Room/DataStore).
+ * Hold types, their grip variants, max-test history, and a session log,
+ * persisted as one JSON snapshot in app-private storage (house style -- see
+ * update/Updater.kt's UpdateSettings and the sibling Morse app's Repo.kt; no
+ * Room/DataStore).
  *
  * Saves on every mutation rather than batching (unlike Morse's Repo, which
  * saves only in onStop()): losing a recorded max test or a logged session to
@@ -22,8 +23,11 @@ import java.util.UUID
 class TrainingRepo(context: Context) {
     private val file = File(context.filesDir, "training.json")
 
-    private val _gripTypes = MutableStateFlow<List<GripType>>(emptyList())
-    val gripTypes = _gripTypes.asStateFlow()
+    private val _holdTypes = MutableStateFlow<List<HoldType>>(emptyList())
+    val holdTypes = _holdTypes.asStateFlow()
+
+    private val _gripVariants = MutableStateFlow<List<GripVariant>>(emptyList())
+    val gripVariants = _gripVariants.asStateFlow()
 
     private val _maxResults = MutableStateFlow<List<MaxTestResult>>(emptyList())
     val maxResults = _maxResults.asStateFlow()
@@ -36,10 +40,16 @@ class TrainingRepo(context: Context) {
         try {
             val root = JSONObject(file.readText())
 
-            val grips = root.optJSONArray("gripTypes") ?: JSONArray()
-            _gripTypes.value = (0 until grips.length()).map {
-                val g = grips.getJSONObject(it)
-                GripType(g.getString("id"), g.getString("name"))
+            val holds = root.optJSONArray("holdTypes") ?: JSONArray()
+            _holdTypes.value = (0 until holds.length()).map {
+                val h = holds.getJSONObject(it)
+                HoldType(h.getString("id"), h.getString("name"))
+            }
+
+            val variants = root.optJSONArray("gripVariants") ?: JSONArray()
+            _gripVariants.value = (0 until variants.length()).map {
+                val v = variants.getJSONObject(it)
+                GripVariant(v.getString("id"), v.getString("holdTypeId"), v.getString("name"))
             }
 
             val results = root.optJSONArray("maxResults") ?: JSONArray()
@@ -47,7 +57,8 @@ class TrainingRepo(context: Context) {
                 val r = results.getJSONObject(it)
                 MaxTestResult(
                     id = r.getString("id"),
-                    gripTypeId = r.getString("gripTypeId"),
+                    gripVariantId = r.getString("gripVariantId"),
+                    hand = Hand.valueOf(r.getString("hand")),
                     peakKg = r.getDouble("peakKg").toFloat(),
                     timestampMs = r.getLong("timestampMs"),
                 )
@@ -71,9 +82,17 @@ class TrainingRepo(context: Context) {
         try {
             val root = JSONObject().apply {
                 put(
-                    "gripTypes",
+                    "holdTypes",
                     JSONArray().apply {
-                        _gripTypes.value.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) }
+                        _holdTypes.value.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) }
+                    },
+                )
+                put(
+                    "gripVariants",
+                    JSONArray().apply {
+                        _gripVariants.value.forEach {
+                            put(JSONObject().put("id", it.id).put("holdTypeId", it.holdTypeId).put("name", it.name))
+                        }
                     },
                 )
                 put(
@@ -83,7 +102,8 @@ class TrainingRepo(context: Context) {
                             put(
                                 JSONObject()
                                     .put("id", it.id)
-                                    .put("gripTypeId", it.gripTypeId)
+                                    .put("gripVariantId", it.gripVariantId)
+                                    .put("hand", it.hand.name)
                                     .put("peakKg", it.peakKg.toDouble())
                                     .put("timestampMs", it.timestampMs),
                             )
@@ -110,34 +130,37 @@ class TrainingRepo(context: Context) {
         }
     }
 
-    fun addGripType(name: String): GripType {
-        val grip = GripType(UUID.randomUUID().toString(), name)
-        _gripTypes.update { it + grip }
+    fun addHoldType(name: String): HoldType {
+        val holdType = HoldType(UUID.randomUUID().toString(), name)
+        _holdTypes.update { it + holdType }
         save()
-        return grip
+        return holdType
     }
 
-    /**
-     * Looks up a grip type by exact name, creating it if missing, and seeds a
-     * [seedPeakKg] max result if it has none yet -- used by programs with a
-     * fixed grip sequence (e.g. No Hangs) so their target bands work before
-     * the user has run real Max Testing against each specific position.
-     * Never overwrites an existing max.
-     */
-    fun ensureGripTypeWithSeedMax(name: String, seedPeakKg: Float): GripType {
-        val grip = _gripTypes.value.firstOrNull { it.name == name } ?: addGripType(name)
-        if (currentMaxKg(grip.id) == null) recordMaxTest(grip.id, seedPeakKg)
-        return grip
-    }
-
-    fun deleteGripType(id: String) {
-        _gripTypes.update { list -> list.filterNot { it.id == id } }
-        _maxResults.update { list -> list.filterNot { it.gripTypeId == id } }
+    /** Deletes a hold type along with every grip variant under it and their max results. */
+    fun deleteHoldType(id: String) {
+        val variantIds = _gripVariants.value.filter { it.holdTypeId == id }.map { it.id }.toSet()
+        _holdTypes.update { list -> list.filterNot { it.id == id } }
+        _gripVariants.update { list -> list.filterNot { it.holdTypeId == id } }
+        _maxResults.update { list -> list.filterNot { it.gripVariantId in variantIds } }
         save()
     }
 
-    fun recordMaxTest(gripTypeId: String, peakKg: Float): MaxTestResult {
-        val result = MaxTestResult(UUID.randomUUID().toString(), gripTypeId, peakKg, System.currentTimeMillis())
+    fun addGripVariant(holdTypeId: String, name: String): GripVariant {
+        val variant = GripVariant(UUID.randomUUID().toString(), holdTypeId, name)
+        _gripVariants.update { it + variant }
+        save()
+        return variant
+    }
+
+    fun deleteGripVariant(id: String) {
+        _gripVariants.update { list -> list.filterNot { it.id == id } }
+        _maxResults.update { list -> list.filterNot { it.gripVariantId == id } }
+        save()
+    }
+
+    fun recordMaxTest(gripVariantId: String, hand: Hand, peakKg: Float): MaxTestResult {
+        val result = MaxTestResult(UUID.randomUUID().toString(), gripVariantId, hand, peakKg, System.currentTimeMillis())
         _maxResults.update { it + result }
         save()
         return result
@@ -148,16 +171,31 @@ class TrainingRepo(context: Context) {
         save()
     }
 
-    /** Average of up to the last 3 results (newest-first) for this grip; null if none exist. */
-    fun currentMaxKg(gripTypeId: String): Float? {
+    /** Average of up to the last 3 results (newest-first) for this variant+hand; null if none exist. */
+    fun currentMaxKg(gripVariantId: String, hand: Hand): Float? {
         val recent = _maxResults.value
-            .filter { it.gripTypeId == gripTypeId }
+            .filter { it.gripVariantId == gripVariantId && it.hand == hand }
             .sortedByDescending { it.timestampMs }
             .take(3)
         if (recent.isEmpty()) return null
         return recent.sumOf { it.peakKg.toDouble() }.toFloat() / recent.size
     }
 
-    fun resultsFor(gripTypeId: String): List<MaxTestResult> =
-        _maxResults.value.filter { it.gripTypeId == gripTypeId }.sortedByDescending { it.timestampMs }
+    fun resultsFor(gripVariantId: String, hand: Hand): List<MaxTestResult> =
+        _maxResults.value.filter { it.gripVariantId == gripVariantId && it.hand == hand }.sortedByDescending { it.timestampMs }
+
+    /**
+     * Looks up a hold type and grip variant by exact name, creating either if missing,
+     * and seeds a [seedPeakKg] max for [hand] if there is none yet -- used by programs
+     * with a fixed grip sequence (e.g. No Hangs) so their target bands work before the
+     * user has run real Max Testing against that specific position+hand. Never
+     * overwrites an existing max.
+     */
+    fun ensureGripVariantWithSeedMax(holdTypeName: String, variantName: String, hand: Hand, seedPeakKg: Float): GripVariant {
+        val holdType = _holdTypes.value.firstOrNull { it.name == holdTypeName } ?: addHoldType(holdTypeName)
+        val variant = _gripVariants.value.firstOrNull { it.holdTypeId == holdType.id && it.name == variantName }
+            ?: addGripVariant(holdType.id, variantName)
+        if (currentMaxKg(variant.id, hand) == null) recordMaxTest(variant.id, hand, seedPeakKg)
+        return variant
+    }
 }

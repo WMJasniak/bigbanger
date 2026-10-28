@@ -19,6 +19,7 @@ package com.wiktor.bigbanger.training
 object Programs {
     private const val DEFAULT_TOLERANCE = 0.05f
     private const val NO_HANGS_PREP_SECONDS = 10
+    private const val NO_HANGS_HOLD_TYPE = "20mm Edge"
 
     /** The 6 fixed grip positions No Hangs cycles through, one 20mm-edge rep count each. */
     private val NO_HANGS_GRIPS = listOf(
@@ -111,7 +112,7 @@ object Programs {
                             durationSeconds = 10,
                             percentOfMax = 0.40f,
                             toleranceBandPoints = DEFAULT_TOLERANCE,
-                            gripTypeName = "20mm $gripLabel (${hand.displayLabel})",
+                            holdTypeName = NO_HANGS_HOLD_TYPE,
                             gripLabel = gripLabel,
                             hand = hand,
                             label = "${rep + 1}/$reps",

@@ -25,7 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
-import com.wiktor.bigbanger.training.GripType
+import com.wiktor.bigbanger.training.GripVariant
+import com.wiktor.bigbanger.training.Hand
+import com.wiktor.bigbanger.training.HoldType
 
 @Composable
 fun SettingsScreen(
@@ -36,8 +38,9 @@ fun SettingsScreen(
 ) {
     BackHandler(onBack = onBack)
 
-    val gripTypes by viewModel.trainingRepo.gripTypes.collectAsStateWithLifecycle()
-    var newName by remember { mutableStateOf("") }
+    val holdTypes by viewModel.trainingRepo.holdTypes.collectAsStateWithLifecycle()
+    val variants by viewModel.trainingRepo.gripVariants.collectAsStateWithLifecycle()
+    var newHoldName by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(
@@ -50,44 +53,47 @@ fun SettingsScreen(
         }
 
         Text(
-            "Grip / edge types",
+            "Holds",
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(top = 16.dp, bottom = 16.dp),
         )
 
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
-                value = newName,
-                onValueChange = { newName = it },
-                label = { Text("New grip type") },
+                value = newHoldName,
+                onValueChange = { newHoldName = it },
+                label = { Text("New hold (e.g. 20mm Edge)") },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
             TextButton(
                 onClick = {
-                    val trimmed = newName.trim()
+                    val trimmed = newHoldName.trim()
                     if (trimmed.isNotEmpty()) {
-                        viewModel.trainingRepo.addGripType(trimmed)
-                        newName = ""
+                        viewModel.trainingRepo.addHoldType(trimmed)
+                        newHoldName = ""
                     }
                 },
             ) { Text("Add") }
         }
 
-        if (gripTypes.isEmpty()) {
+        if (holdTypes.isEmpty()) {
             Text(
-                "No grip types yet -- add one above before running a program.",
+                "No holds yet -- add one above (e.g. \"20mm Edge\"), then add its grips below.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 24.dp),
             )
         }
 
         LazyColumn(modifier = Modifier.weight(1f).padding(top = 8.dp)) {
-            items(gripTypes, key = { it.id }) { grip ->
-                GripTypeRow(
-                    grip = grip,
-                    currentMaxKg = viewModel.trainingRepo.currentMaxKg(grip.id),
-                    onDelete = { viewModel.trainingRepo.deleteGripType(grip.id) },
+            items(holdTypes, key = { it.id }) { holdType ->
+                HoldTypeCard(
+                    holdType = holdType,
+                    variants = variants.filter { it.holdTypeId == holdType.id },
+                    maxForHand = { variant, hand -> viewModel.trainingRepo.currentMaxKg(variant.id, hand) },
+                    onDeleteHold = { viewModel.trainingRepo.deleteHoldType(holdType.id) },
+                    onAddVariant = { name -> viewModel.trainingRepo.addGripVariant(holdType.id, name) },
+                    onDeleteVariant = { variant -> viewModel.trainingRepo.deleteGripVariant(variant.id) },
                 )
             }
         }
@@ -109,22 +115,68 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun GripTypeRow(grip: GripType, currentMaxKg: Float?, onDelete: () -> Unit) {
+private fun HoldTypeCard(
+    holdType: HoldType,
+    variants: List<GripVariant>,
+    maxForHand: (GripVariant, Hand) -> Float?,
+    onDeleteHold: () -> Unit,
+    onAddVariant: (String) -> Unit,
+    onDeleteVariant: (GripVariant) -> Unit,
+) {
+    var newVariantName by remember { mutableStateOf("") }
+
     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text(grip.name, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (currentMaxKg != null) "Current max: ${"%.1f".format(currentMaxKg)} kg" else "No max recorded yet",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(holdType.name, style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = onDeleteHold) { Text("Delete") }
             }
-            TextButton(onClick = onDelete) { Text("Delete") }
+
+            variants.forEach { variant ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp, start = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column {
+                        Text(variant.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "L: ${formatMax(maxForHand(variant, Hand.LEFT))} · R: ${formatMax(maxForHand(variant, Hand.RIGHT))}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = { onDeleteVariant(variant) }) { Text("Delete") }
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp, start = 12.dp),
+            ) {
+                OutlinedTextField(
+                    value = newVariantName,
+                    onValueChange = { newVariantName = it },
+                    label = { Text("New grip (e.g. 4-Finger Half Crimp)") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = {
+                        val trimmed = newVariantName.trim()
+                        if (trimmed.isNotEmpty()) {
+                            onAddVariant(trimmed)
+                            newVariantName = ""
+                        }
+                    },
+                ) { Text("Add") }
+            }
         }
     }
 }
+
+private fun formatMax(kg: Float?): String = if (kg != null) "${"%.1f".format(kg)} kg" else "no max"
