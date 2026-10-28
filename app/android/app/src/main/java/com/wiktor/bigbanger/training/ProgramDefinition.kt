@@ -61,3 +61,16 @@ data class ProgramTiming(
     val workSeconds: Int,
     val restSeconds: Int,
 )
+
+/**
+ * A quick, per-run volume override picked on the Ready gate right before starting --
+ * deliberately not persisted like [ProgramTiming], since it is meant as a one-off "I'm
+ * in a hurry today" choice rather than a standing setting that could silently stay on
+ * Express next time. [repsFraction] scales whatever reps/attempts/sets count a program
+ * would otherwise use (see [Programs.scaleReps]); [FULL] is a no-op.
+ */
+enum class TrainingMode(val label: String, val repsFraction: Float) {
+    FULL("Full", 1f),
+    FAST("Fast", 0.66f),
+    EXPRESS("Express", 0.4f),
+}

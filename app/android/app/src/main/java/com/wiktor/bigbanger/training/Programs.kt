@@ -42,6 +42,11 @@ object Programs {
     private fun noHangsProtocolRepsFor(gripName: String): Int =
         NO_HANGS_DEFAULT_GRIPS.firstOrNull { it.first == gripName }?.second ?: 2
 
+    /** Applies a [TrainingMode]'s volume cut to a reps/attempts/sets count, rounding up
+     * and never going below 1 -- a cut rep count is still at least one rep, never zero. */
+    fun scaleReps(reps: Int, mode: TrainingMode): Int =
+        kotlin.math.ceil(reps * mode.repsFraction).toInt().coerceAtLeast(1)
+
     /** Each program's own built-in numbers, used until the user changes them in its settings. */
     fun defaultTimingFor(id: ProgramId): ProgramTiming = when (id) {
         ProgramId.MAX_HANGS -> ProgramTiming(reps = 6, workSeconds = 10, restSeconds = 120)
@@ -60,9 +65,9 @@ object Programs {
 
     val all = listOf(WARM_UP, NO_HANGS, MAX_HANGS, MAX_TESTING)
 
-    /** Max Hangs' one-leg template: [timing.reps] reps at 85% of max, separated by rest. */
-    fun buildMaxHangsBase(timing: ProgramTiming): ProgramDefinition {
-        val reps = timing.reps.coerceAtLeast(1)
+    /** Max Hangs' one-leg template: [timing.reps] reps (cut by [mode]) at 85% of max, separated by rest. */
+    fun buildMaxHangsBase(timing: ProgramTiming, mode: TrainingMode): ProgramDefinition {
+        val reps = scaleReps(timing.reps.coerceAtLeast(1), mode)
         return ProgramDefinition(
             id = ProgramId.MAX_HANGS,
             title = "Max Hangs",
@@ -84,9 +89,9 @@ object Programs {
         )
     }
 
-    /** Max Testing's one-leg template: [timing.reps] no-target attempts, separated by rest. */
-    fun buildMaxTestingBase(timing: ProgramTiming): ProgramDefinition {
-        val attempts = timing.reps.coerceAtLeast(1)
+    /** Max Testing's one-leg template: [timing.reps] no-target attempts (cut by [mode]), separated by rest. */
+    fun buildMaxTestingBase(timing: ProgramTiming, mode: TrainingMode): ProgramDefinition {
+        val attempts = scaleReps(timing.reps.coerceAtLeast(1), mode)
         return ProgramDefinition(
             id = ProgramId.MAX_TESTING,
             title = "Max Testing",
@@ -100,9 +105,11 @@ object Programs {
         )
     }
 
-    /** Warm Up's one-leg template: the 50/60/70/80/90% ramp, repeated [timing.reps] times (sets). */
-    fun buildWarmUpBase(timing: ProgramTiming): ProgramDefinition {
-        val sets = timing.reps.coerceAtLeast(1)
+    /** Warm Up's one-leg template: the 50/60/70/80/90% ramp, repeated [timing.reps] times
+     * (sets), cut by [mode] -- though at the default of 1 set, [mode] has nothing left to
+     * cut; the ramp's 5 steps themselves stay fixed regardless. */
+    fun buildWarmUpBase(timing: ProgramTiming, mode: TrainingMode): ProgramDefinition {
+        val sets = scaleReps(timing.reps.coerceAtLeast(1), mode)
         val percents = listOf(0.50f, 0.60f, 0.70f, 0.80f, 0.90f)
         return ProgramDefinition(
             id = ProgramId.WARM_UP,
@@ -131,10 +138,11 @@ object Programs {
     /**
      * No Hangs' own expansion: unlike [expandWithGripSequence]'s uniform per-leg template,
      * each grip gets its own rep count (see [NO_HANGS_DEFAULT_GRIPS]) when [timing.reps]
-     * is 0 ("use protocol defaults"), or [timing.reps] uniformly for every grip otherwise.
-     * Each grip is still trained one hand at a time (left, then right) with one PREP per leg.
+     * is 0 ("use protocol defaults"), or [timing.reps] uniformly for every grip otherwise
+     * -- either way cut by [mode] afterward. Each grip is still trained one hand at a
+     * time (left, then right) with one PREP per leg.
      */
-    fun buildNoHangs(legs: List<Pair<HoldType, GripVariant>>, timing: ProgramTiming): ProgramDefinition {
+    fun buildNoHangs(legs: List<Pair<HoldType, GripVariant>>, timing: ProgramTiming, mode: TrainingMode): ProgramDefinition {
         val handLegs = legs.flatMap { (holdType, variant) -> Hand.entries.map { hand -> Triple(holdType, variant, hand) } }
         val steps = buildList {
             handLegs.forEachIndexed { legIndex, (holdType, variant, hand) ->
@@ -146,7 +154,8 @@ object Programs {
                         hand = hand,
                     ),
                 )
-                val reps = if (timing.reps > 0) timing.reps else noHangsProtocolRepsFor(variant.name)
+                val baseReps = if (timing.reps > 0) timing.reps else noHangsProtocolRepsFor(variant.name)
+                val reps = scaleReps(baseReps, mode)
                 repeat(reps) { rep ->
                     add(
                         ProgramStep(

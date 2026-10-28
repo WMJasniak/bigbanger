@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -36,6 +37,7 @@ import com.wiktor.bigbanger.training.ProgramRunner
 import com.wiktor.bigbanger.training.ProgramStep
 import com.wiktor.bigbanger.training.RunnerPhase
 import com.wiktor.bigbanger.training.StepKind
+import com.wiktor.bigbanger.training.TrainingMode
 
 /** ~1 WORK hold of past, ~1 REST of future preview, either side of the live point. */
 private const val RUNNER_CHART_WINDOW_SECONDS = 30f
@@ -47,6 +49,21 @@ fun ProgramRunnerScreen(
     onFinished: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    var mode by remember { mutableStateOf(TrainingMode.FULL) }
+    var resolvedProgram by remember { mutableStateOf<ProgramDefinition?>(null) }
+    val runningProgram = resolvedProgram
+
+    if (runningProgram == null) {
+        BackHandler(onBack = onFinished)
+        ReadyGate(
+            program = program,
+            mode = mode,
+            onModeChange = { mode = it },
+            onTare = { viewModel.tare() },
+            onStart = { resolvedProgram = viewModel.resolveProgramForRun(program, mode) },
+        )
+        return
+    }
 
     // Every step in a resolved program names its own grip via holdTypeName/gripLabel --
     // resolveProgramForRun always expands against a configured grip sequence.
@@ -57,9 +74,9 @@ fun ProgramRunnerScreen(
         return viewModel.trainingRepo.gripVariants.value.firstOrNull { it.holdTypeId == holdType.id && it.name == label }
     }
 
-    val runner = remember(program) {
+    val runner = remember(runningProgram) {
         ProgramRunner(
-            program = program,
+            program = runningProgram,
             maxKgForStep = { step: ProgramStep ->
                 val hand = step.hand
                 val variant = resolveVariant(step)
@@ -70,7 +87,8 @@ fun ProgramRunnerScreen(
             currentHistory = { viewModel.weightHistory.value },
         )
     }
-    var isReady by remember { mutableStateOf(false) }
+
+    LaunchedEffect(runner) { runner.start() }
 
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
     LaunchedEffect(connectionState) {
@@ -81,13 +99,13 @@ fun ProgramRunnerScreen(
         }
     }
 
-    LaunchedEffect(runner.stepIndex, isReady) {
-        if (isReady) viewModel.setSimulatedTargetBand(runner.targetRangeKg)
+    LaunchedEffect(runner.stepIndex) {
+        viewModel.setSimulatedTargetBand(runner.targetRangeKg)
     }
 
     LaunchedEffect(runner.phase) {
         if (runner.phase is RunnerPhase.Finished) {
-            viewModel.trainingRepo.logSession(program.id)
+            viewModel.trainingRepo.logSession(runningProgram.id)
             onFinished()
         }
     }
@@ -95,18 +113,6 @@ fun ProgramRunnerScreen(
     BackHandler {
         runner.cancel()
         onFinished()
-    }
-
-    if (!isReady) {
-        ReadyGate(
-            program = program,
-            onTare = { viewModel.tare() },
-            onStart = {
-                isReady = true
-                runner.start()
-            },
-        )
-        return
     }
 
     val history by viewModel.weightHistory.collectAsStateWithLifecycle()
@@ -120,15 +126,15 @@ fun ProgramRunnerScreen(
     // shift position every other step.
     val isRest = step.kind == StepKind.REST
     val gripHandText = if (isRest) {
-        program.steps.getOrNull(runner.stepIndex + 1)?.let { upcoming -> gripHandLabel(upcoming)?.let { "Next: $it" } }
+        runningProgram.steps.getOrNull(runner.stepIndex + 1)?.let { upcoming -> gripHandLabel(upcoming)?.let { "Next: $it" } }
     } else {
         gripHandLabel(step)
     }
-    val repCounterText = if (isRest) program.steps.getOrNull(runner.stepIndex - 1)?.label else step.label
+    val repCounterText = if (isRest) runningProgram.steps.getOrNull(runner.stepIndex - 1)?.label else step.label
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         LinearProgressIndicator(
-            progress = { (runner.stepIndex + 1f) / program.steps.size },
+            progress = { (runner.stepIndex + 1f) / runningProgram.steps.size },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -234,16 +240,36 @@ private fun gripHandLabel(step: ProgramStep): String? {
 }
 
 @Composable
-private fun ReadyGate(program: ProgramDefinition, onTare: () -> Unit, onStart: () -> Unit) {
+private fun ReadyGate(
+    program: ProgramDefinition,
+    mode: TrainingMode,
+    onModeChange: (TrainingMode) -> Unit,
+    onTare: () -> Unit,
+    onStart: () -> Unit,
+) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(
             program.title,
             style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(top = 8.dp, bottom = 32.dp),
+            modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
         )
+
+        Text("Volume", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TrainingMode.entries.forEach { entry ->
+                FilterChip(
+                    selected = entry == mode,
+                    onClick = { onModeChange(entry) },
+                    label = { Text(entry.label) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
         Text(
             "Tare the scale with no load on it, then start.",
             style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(top = 24.dp),
         )
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp),

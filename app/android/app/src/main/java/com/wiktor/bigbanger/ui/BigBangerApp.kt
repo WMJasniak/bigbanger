@@ -71,12 +71,14 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
         Screen.Home -> HomeScreen(
             viewModel = viewModel,
             onSelectProgram = { baseProgram ->
-                val program = viewModel.resolveProgramForRun(baseProgram)
-                if (program == null) {
+                if (!viewModel.hasGripsConfigured(baseProgram.id)) {
                     unconfiguredProgram = baseProgram
                 } else {
+                    // The actual grip sequence/timing/mode resolution happens on the Ready
+                    // gate (ProgramRunnerScreen), once the volume mode is picked -- this
+                    // only checks there is something to run at all.
                     val connected = viewModel.connectionState.value is ConnectionState.Connected
-                    screen = if (connected) Screen.Running(program) else Screen.Connect(program)
+                    screen = if (connected) Screen.Running(baseProgram) else Screen.Connect(baseProgram)
                 }
             },
             onOpenProgramGripConfig = { program -> screen = Screen.ProgramGripConfig(program) },

@@ -45,6 +45,12 @@ class TrainingRepo(context: Context) {
     private val _programTiming = MutableStateFlow<Map<ProgramId, ProgramTiming>>(emptyMap())
     val programTiming = _programTiming.asStateFlow()
 
+    /** Grip variant IDs temporarily excluded from a run without losing their place in
+     * [programGripSequences] -- e.g. skipping an injured grip for a while, then
+     * re-enabling it later with its ordering intact instead of re-adding it at the end. */
+    private val _programDisabledGrips = MutableStateFlow<Map<ProgramId, Set<String>>>(emptyMap())
+    val programDisabledGrips = _programDisabledGrips.asStateFlow()
+
     fun load() {
         if (!file.exists()) return
         try {
@@ -100,6 +106,13 @@ class TrainingRepo(context: Context) {
                     workSeconds = t.getInt("workSeconds"),
                     restSeconds = t.getInt("restSeconds"),
                 )
+            }?.toMap() ?: emptyMap()
+
+            val disabled = root.optJSONObject("programDisabledGrips")
+            _programDisabledGrips.value = disabled?.keys()?.asSequence()?.mapNotNull { key ->
+                val programId = runCatching { ProgramId.valueOf(key) }.getOrNull() ?: return@mapNotNull null
+                val ids = disabled.getJSONArray(key)
+                programId to (0 until ids.length()).map { ids.getString(it) }.toSet()
             }?.toMap() ?: emptyMap()
         } catch (_: Exception) {
             // Corrupt or unreadable state: start fresh rather than crash.
@@ -173,6 +186,14 @@ class TrainingRepo(context: Context) {
                         }
                     },
                 )
+                put(
+                    "programDisabledGrips",
+                    JSONObject().apply {
+                        _programDisabledGrips.value.forEach { (programId, ids) ->
+                            put(programId.name, JSONArray(ids.toList()))
+                        }
+                    },
+                )
             }
             file.writeText(root.toString())
         } catch (_: Exception) {
@@ -207,6 +228,7 @@ class TrainingRepo(context: Context) {
         _gripVariants.update { list -> list.filterNot { it.id == id } }
         _maxResults.update { list -> list.filterNot { it.gripVariantId == id } }
         _programGripSequences.update { map -> map.mapValues { (_, ids) -> ids.filterNot { it == id } } }
+        _programDisabledGrips.update { map -> map.mapValues { (_, ids) -> ids - id } }
         save()
     }
 
@@ -219,6 +241,18 @@ class TrainingRepo(context: Context) {
 
     fun setGripSequence(programId: ProgramId, variantIds: List<String>) {
         _programGripSequences.update { it + (programId to variantIds) }
+        save()
+    }
+
+    /** Grips in [gripSequenceFor] that are temporarily skipped for this program (e.g. an
+     * injured grip) -- still shown in its settings, in their place, just excluded from a run. */
+    fun disabledGripsFor(programId: ProgramId): Set<String> = _programDisabledGrips.value[programId] ?: emptySet()
+
+    fun setGripEnabled(programId: ProgramId, variantId: String, enabled: Boolean) {
+        _programDisabledGrips.update { map ->
+            val current = map[programId] ?: emptySet()
+            map + (programId to if (enabled) current - variantId else current + variantId)
+        }
         save()
     }
 
