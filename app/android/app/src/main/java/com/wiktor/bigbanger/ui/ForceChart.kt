@@ -114,8 +114,13 @@ fun ForceChart(
         val rawMin: Float
         val rawMax: Float
         if (hasRealTarget) {
+            // A tiny epsilon floor only, to avoid a zero-span range -- not a full
+            // kilogram: that was silently forcing at least a 1kg-tall axis regardless
+            // of how small the real band actually is (e.g. a 1kg placeholder max makes
+            // for a band well under 1kg), which is what actually produced the huge gap
+            // above the band, not neighboring legs.
             rawMin = (listOf(0f) + targetExtremes).min()
-            rawMax = (listOf(rawMin + 1f) + targetExtremes).max()
+            rawMax = (listOf(rawMin + 0.05f) + targetExtremes).max()
         } else {
             val sampleMin = visible.minOfOrNull { it.kilograms }
             val sampleMax = visible.maxOfOrNull { it.kilograms }
