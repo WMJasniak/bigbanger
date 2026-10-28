@@ -18,11 +18,18 @@ package com.wiktor.bigbanger.training
  */
 object Programs {
     private const val DEFAULT_TOLERANCE = 0.05f
-    private const val NO_HANGS_PREP_SECONDS = 10
-    private const val NO_HANGS_HOLD_TYPE = "20mm Edge"
+    const val NO_HANGS_PREP_SECONDS = 10
+    const val NO_HANGS_HOLD_TYPE = "20mm Edge"
+    private const val NO_HANGS_DEFAULT_REPS = 2
 
-    /** The 6 fixed grip positions No Hangs cycles through, one 20mm-edge rep count each. */
-    private val NO_HANGS_GRIPS = listOf(
+    /**
+     * No Hangs' default grip order and per-grip rep count, from the Abrahangs protocol --
+     * used both to seed its grip sequence the first time (see
+     * [TrainingRepo.ensureNoHangsDefaultSeeded]) and, in [buildNoHangs], to size each
+     * grip's reps when running it. A grip the user adds later that isn't one of these six
+     * falls back to [NO_HANGS_DEFAULT_REPS].
+     */
+    val NO_HANGS_DEFAULT_GRIPS = listOf(
         "4-Finger Half Crimp" to 6,
         "Front-3 Open" to 6,
         "Front-2 Open" to 2,
@@ -30,6 +37,9 @@ object Programs {
         "Front-2 Half Crimp" to 2,
         "Middle-2 Half Crimp" to 2,
     )
+
+    private fun noHangsRepsFor(gripName: String): Int =
+        NO_HANGS_DEFAULT_GRIPS.firstOrNull { it.first == gripName }?.second ?: NO_HANGS_DEFAULT_REPS
 
     val MAX_HANGS = ProgramDefinition(
         id = ProgramId.MAX_HANGS,
@@ -84,27 +94,36 @@ object Programs {
         },
     )
 
+    /** Display-only stub for the Home list and settings screens -- the steps actually run
+     * come from [buildNoHangs], driven by whatever grip sequence is configured for it. */
     val NO_HANGS = ProgramDefinition(
         id = ProgramId.NO_HANGS,
         title = "No Hangs",
         hasNoTarget = false,
-        usesFixedGripSequence = true,
-        steps = buildList {
-            // Each grip is a leg per hand (left, then right) before moving to the next grip.
-            val legs = NO_HANGS_GRIPS.flatMap { (gripLabel, reps) ->
-                listOf(Hand.LEFT, Hand.RIGHT).map { hand -> Triple(gripLabel, hand, reps) }
-            }
-            legs.forEachIndexed { legIndex, (gripLabel, hand, reps) ->
-                // One 10s PREP per leg (not per rep) -- the grip/hand doesn't change rep to
-                // rep within a leg, so only a leg switch needs a "get into position" beat.
+        steps = listOf(ProgramStep(kind = StepKind.WORK, durationSeconds = 10, percentOfMax = 0.40f)),
+    )
+
+    val all = listOf(WARM_UP, NO_HANGS, MAX_HANGS, MAX_TESTING)
+
+    /**
+     * No Hangs' own expansion: unlike [expandWithGripSequence]'s uniform per-leg template,
+     * each grip gets its own rep count (see [NO_HANGS_DEFAULT_GRIPS]) instead of the same
+     * template repeated for every grip. Each grip is still trained one hand at a time
+     * (left, then right) with one 10s PREP per leg, same shape as [expandWithGripSequence].
+     */
+    fun buildNoHangs(legs: List<Pair<HoldType, GripVariant>>): ProgramDefinition {
+        val handLegs = legs.flatMap { (holdType, variant) -> Hand.entries.map { hand -> Triple(holdType, variant, hand) } }
+        val steps = buildList {
+            handLegs.forEachIndexed { legIndex, (holdType, variant, hand) ->
                 add(
                     ProgramStep(
                         kind = StepKind.PREP,
                         durationSeconds = NO_HANGS_PREP_SECONDS,
-                        gripLabel = gripLabel,
+                        gripLabel = variant.name,
                         hand = hand,
                     ),
                 )
+                val reps = noHangsRepsFor(variant.name)
                 repeat(reps) { rep ->
                     add(
                         ProgramStep(
@@ -112,33 +131,32 @@ object Programs {
                             durationSeconds = 10,
                             percentOfMax = 0.40f,
                             toleranceBandPoints = DEFAULT_TOLERANCE,
-                            holdTypeName = NO_HANGS_HOLD_TYPE,
-                            gripLabel = gripLabel,
+                            holdTypeName = holdType.name,
+                            gripLabel = variant.name,
                             hand = hand,
                             label = "${rep + 1}/$reps",
                         ),
                     )
-                    val isLastRepOfLastLeg = legIndex == legs.lastIndex && rep == reps - 1
+                    val isLastRepOfLastLeg = legIndex == handLegs.lastIndex && rep == reps - 1
                     if (!isLastRepOfLastLeg) add(ProgramStep(StepKind.REST, 20))
                 }
             }
-        },
-    )
-
-    val all = listOf(WARM_UP, NO_HANGS, MAX_HANGS, MAX_TESTING)
+        }
+        return ProgramDefinition(id = ProgramId.NO_HANGS, title = "No Hangs", hasNoTarget = false, steps = steps)
+    }
 }
 
 private const val GRIP_SEQUENCE_PREP_SECONDS = 10
 
 /**
  * Expands [base]'s own step template into a run through [legs] in the given order,
- * each grip trained one hand at a time (left then right) -- the same shape No Hangs'
- * hardcoded sequence already uses, just built from a user-chosen grip list instead of
- * a fixed one. Returns [base] unchanged if [legs] is empty, so a program with nothing
- * configured keeps today's "pick a grip, run it once" behavior.
+ * each grip trained one hand at a time (left then right) -- the same shape
+ * [Programs.buildNoHangs] uses, just with [base]'s template repeated identically for
+ * every leg instead of a per-grip rep count. [legs] must be non-empty; callers check
+ * for an unconfigured (empty) grip sequence before resolving (see
+ * [BigBangerViewModel.resolveProgramForRun]).
  */
 fun expandWithGripSequence(base: ProgramDefinition, legs: List<Pair<HoldType, GripVariant>>): ProgramDefinition {
-    if (legs.isEmpty()) return base
     val handLegs = legs.flatMap { (holdType, variant) -> Hand.entries.map { hand -> Triple(holdType, variant, hand) } }
     val legGapSeconds = base.steps.firstOrNull { it.kind == StepKind.REST }?.durationSeconds ?: 60
     val steps = buildList {
@@ -156,5 +174,5 @@ fun expandWithGripSequence(base: ProgramDefinition, legs: List<Pair<HoldType, Gr
             if (legIndex != handLegs.lastIndex) add(ProgramStep(StepKind.REST, legGapSeconds))
         }
     }
-    return base.copy(steps = steps, usesFixedGripSequence = true)
+    return base.copy(steps = steps)
 }

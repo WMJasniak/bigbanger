@@ -10,14 +10,15 @@ import com.wiktor.bigbanger.ble.ScaleSource
 import com.wiktor.bigbanger.ble.SimulatedScaleSource
 import com.wiktor.bigbanger.ble.WeightSample
 import com.wiktor.bigbanger.training.ProgramDefinition
-import com.wiktor.bigbanger.training.ProgramStep
-import com.wiktor.bigbanger.training.StepKind
+import com.wiktor.bigbanger.training.ProgramId
+import com.wiktor.bigbanger.training.Programs
 import com.wiktor.bigbanger.training.TrainingRepo
 import com.wiktor.bigbanger.training.expandWithGripSequence
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 
@@ -28,7 +29,19 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
     private val _activeSource = MutableStateFlow<ScaleSource>(realSource)
     private val activeSource: ScaleSource get() = _activeSource.value
 
-    val trainingRepo = TrainingRepo(application).also { it.load() }
+    val trainingRepo = TrainingRepo(application).also {
+        it.load()
+        it.ensureNoHangsDefaultSeeded()
+    }
+
+    private val themeSettings = ThemeSettings(application)
+    private val _isDarkTheme = MutableStateFlow(themeSettings.darkMode)
+    val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
+
+    fun setDarkTheme(enabled: Boolean) {
+        themeSettings.darkMode = enabled
+        _isDarkTheme.value = enabled
+    }
 
     // Backed by flatMapLatest (not a plain `val x = activeSource.x`) so that
     // collectors keep receiving updates after connectSimulated() swaps the
@@ -64,49 +77,23 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /**
-     * Programs with a fixed grip sequence (e.g. No Hangs) skip the "pick a hold,
-     * grip and hand" screens entirely -- this makes sure each of their named
-     * hold/grip/hand positions exists (with a seeded placeholder max, if it has
-     * no real one yet) before the run starts. No-op for every other program.
+     * Expands [program] into a run through its configured grip sequence (set via its own
+     * settings screen) -- every grip trained one hand at a time, same shape as No Hangs
+     * always used. Returns null if nothing is configured yet, so the caller can prompt
+     * the user to set it up instead of starting a run with no grip to target. The result
+     * always starts with a PREP step (every expansion already leads with one per leg), so
+     * there is never a run that goes straight from the Ready gate into a WORK step with no
+     * countdown to get into position first.
      */
-    fun ensureFixedGripSequenceSeeded(program: ProgramDefinition) {
-        if (!program.usesFixedGripSequence) return
-        program.steps
-            .filter { it.holdTypeName != null && it.gripLabel != null && it.hand != null }
-            .distinctBy { Triple(it.holdTypeName, it.gripLabel, it.hand) }
-            .forEach { step ->
-                trainingRepo.ensureGripVariantWithSeedMax(
-                    holdTypeName = step.holdTypeName!!,
-                    variantName = step.gripLabel!!,
-                    hand = step.hand!!,
-                    seedPeakKg = 1f,
-                )
-            }
-    }
-
-    /**
-     * If the user has configured an ordered grip list for this program (via its own
-     * settings screen), expands it into a run through all of them, same shape as No
-     * Hangs' own hardcoded sequence; otherwise returns [program] unchanged, so a
-     * program with nothing configured keeps asking which grip to use each run. Either
-     * way, the result always starts with a PREP step: an expanded/fixed sequence
-     * already leads with one per leg, but a plain single-grip program doesn't, so one
-     * is added here -- there should never be a run that goes straight from the Ready
-     * gate into a WORK step with no countdown to get into position first.
-     */
-    fun resolveProgramForRun(program: ProgramDefinition): ProgramDefinition {
-        val resolved = if (program.usesFixedGripSequence) {
-            program
-        } else {
-            val legs = trainingRepo.gripSequenceFor(program.id).mapNotNull { variant ->
-                trainingRepo.holdTypes.value.firstOrNull { it.id == variant.holdTypeId }?.let { it to variant }
-            }
-            expandWithGripSequence(program, legs)
+    fun resolveProgramForRun(program: ProgramDefinition): ProgramDefinition? {
+        val legs = trainingRepo.gripSequenceFor(program.id).mapNotNull { variant ->
+            trainingRepo.holdTypes.value.firstOrNull { it.id == variant.holdTypeId }?.let { it to variant }
         }
-        return if (resolved.steps.firstOrNull()?.kind == StepKind.PREP) {
-            resolved
+        if (legs.isEmpty()) return null
+        return if (program.id == ProgramId.NO_HANGS) {
+            Programs.buildNoHangs(legs)
         } else {
-            resolved.copy(steps = listOf(ProgramStep(kind = StepKind.PREP, durationSeconds = 10)) + resolved.steps)
+            expandWithGripSequence(program, legs)
         }
     }
 

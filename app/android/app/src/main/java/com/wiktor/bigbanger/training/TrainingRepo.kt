@@ -192,6 +192,22 @@ class TrainingRepo(context: Context) {
         save()
     }
 
+    /**
+     * No Hangs ships with a default grip order (see [Programs.NO_HANGS_DEFAULT_GRIPS]) so
+     * it works before the user ever opens its settings, instead of starting out empty like
+     * every other program. Seeded once, only the first time its sequence is missing
+     * entirely -- not reseeded if the user later clears it on purpose (an explicitly empty
+     * list stays empty).
+     */
+    fun ensureNoHangsDefaultSeeded() {
+        if (_programGripSequences.value.containsKey(ProgramId.NO_HANGS)) return
+        val ids = Programs.NO_HANGS_DEFAULT_GRIPS.map { (gripName, _) ->
+            ensureGripVariantWithSeedMax(Programs.NO_HANGS_HOLD_TYPE, gripName, Hand.LEFT, 1f)
+            ensureGripVariantWithSeedMax(Programs.NO_HANGS_HOLD_TYPE, gripName, Hand.RIGHT, 1f).id
+        }
+        setGripSequence(ProgramId.NO_HANGS, ids)
+    }
+
     fun recordMaxTest(gripVariantId: String, hand: Hand, peakKg: Float): MaxTestResult {
         val result = MaxTestResult(UUID.randomUUID().toString(), gripVariantId, hand, peakKg, System.currentTimeMillis())
         _maxResults.update { it + result }

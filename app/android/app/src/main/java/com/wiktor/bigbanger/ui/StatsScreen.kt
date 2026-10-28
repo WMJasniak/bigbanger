@@ -1,7 +1,6 @@
 package com.wiktor.bigbanger.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,10 +11,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,14 +35,7 @@ fun StatsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit) {
     val sessions by viewModel.trainingRepo.sessions.collectAsStateWithLifecycle()
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onBack) { Text("Back") }
-            Text("Stats", style = MaterialTheme.typography.titleLarge)
-        }
+        Text("Stats", style = MaterialTheme.typography.titleLarge)
 
         Text(
             "Activity",
@@ -56,7 +46,7 @@ fun StatsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit) {
 
         if (holdTypes.isEmpty()) {
             Text(
-                "Add a hold in Settings, then run Max Testing to start tracking.",
+                "Add a hold in Settings -> Holds & grips, then run Max Testing to start tracking.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 24.dp),
             )

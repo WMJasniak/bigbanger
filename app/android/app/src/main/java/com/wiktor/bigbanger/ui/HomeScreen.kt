@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -48,9 +51,11 @@ fun HomeScreen(
                 ProgramCard(
                     program = program,
                     onClick = { onSelectProgram(program) },
-                    // No Hangs already dictates its own grips; nothing to configure.
-                    onOpenGripConfig = if (program.usesFixedGripSequence) null else ({ onOpenProgramGripConfig(program) }),
+                    onOpenGripConfig = { onOpenProgramGripConfig(program) },
                 )
+            }
+            item {
+                HomeTile(title = "Raw data", onClick = onFreeMeasure)
             }
         }
 
@@ -61,27 +66,35 @@ fun HomeScreen(
             OutlinedButton(onClick = onStats, modifier = Modifier.weight(1f)) { Text("Stats") }
             OutlinedButton(onClick = onSettings, modifier = Modifier.weight(1f)) { Text("Settings") }
         }
-        TextButton(onClick = onFreeMeasure, modifier = Modifier.fillMaxWidth()) {
-            Text("Raw data")
-        }
     }
 }
 
 @Composable
-private fun ProgramCard(program: ProgramDefinition, onClick: () -> Unit, onOpenGripConfig: (() -> Unit)?) {
+private fun ProgramCard(program: ProgramDefinition, onClick: () -> Unit, onOpenGripConfig: () -> Unit) {
+    HomeTile(
+        title = program.title,
+        onClick = onClick,
+        trailing = {
+            IconButton(onClick = onOpenGripConfig) {
+                Icon(Icons.Filled.Settings, contentDescription = "${program.title} settings")
+            }
+        },
+    )
+}
+
+/** A full-width, tap-anywhere card -- the whole tile navigates, so no trailing arrow
+ * is needed to say so. Shared by program tiles and the Raw Data entry for a
+ * consistent look across Home. */
+@Composable
+private fun HomeTile(title: String, onClick: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(program.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            onOpenGripConfig?.let {
-                TextButton(onClick = it) {
-                    Text("⚙", style = MaterialTheme.typography.titleMedium)
-                }
-            }
-            Text(">", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            trailing?.invoke()
         }
     }
 }

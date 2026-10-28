@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wiktor.bigbanger.ui.BigBangerApp
@@ -30,7 +32,7 @@ private const val CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000L // twice a day at mos
 // A deliberate dark palette -- overriding only `primary` on the Material3 baseline
 // left every other token at its default blue-violet tuning, which clashed with the
 // orange accent and read as washed out/low-contrast throughout the app.
-private val BigBangerColorScheme = darkColorScheme(
+private val BigBangerDarkColorScheme = darkColorScheme(
     primary = Color(0xFFE1551F),
     onPrimary = Color(0xFFFFFAF6),
     primaryContainer = Color(0xFF5A2512),
@@ -47,6 +49,25 @@ private val BigBangerColorScheme = darkColorScheme(
     outlineVariant = Color(0xFF3A3531),
 )
 
+// The light counterpart -- same orange/gold accent, deepened slightly for contrast
+// against a light background instead of a dark one.
+private val BigBangerLightColorScheme = lightColorScheme(
+    primary = Color(0xFFB8420A),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFDBC7),
+    onPrimaryContainer = Color(0xFF3A1200),
+    secondary = Color(0xFF8A6D00),
+    onSecondary = Color(0xFFFFFFFF),
+    background = Color(0xFFFBF8F5),
+    onBackground = Color(0xFF231F1C),
+    surface = Color(0xFFFBF8F5),
+    onSurface = Color(0xFF231F1C),
+    surfaceVariant = Color(0xFFEFE7DF),
+    onSurfaceVariant = Color(0xFF52473C),
+    outline = Color(0xFF857A6E),
+    outlineVariant = Color(0xFFD8CCC0),
+)
+
 class MainActivity : ComponentActivity() {
     private val updater by lazy { Updater(applicationContext) }
     private val updateSettings by lazy { UpdateSettings(applicationContext) }
@@ -54,9 +75,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = BigBangerColorScheme) {
+            val viewModel: BigBangerViewModel = viewModel()
+            val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
+            MaterialTheme(colorScheme = if (isDarkTheme) BigBangerDarkColorScheme else BigBangerLightColorScheme) {
                 Surface(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
-                    val viewModel: BigBangerViewModel = viewModel()
                     var availableRelease by remember { mutableStateOf<ReleaseInfo?>(null) }
                     var updatePhase by remember { mutableStateOf<UpdatePhase>(UpdatePhase.Idle) }
                     var manualCheckStatus by remember { mutableStateOf<String?>(null) }

@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -18,6 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
 import com.wiktor.bigbanger.ble.ConnectionState
+import com.wiktor.bigbanger.training.ProgramDefinition
 
 private fun requiredBlePermissions(): Array<String> =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -61,18 +65,18 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
     }
 
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var unconfiguredProgram by remember { mutableStateOf<ProgramDefinition?>(null) }
 
     when (val s = screen) {
         Screen.Home -> HomeScreen(
             viewModel = viewModel,
             onSelectProgram = { baseProgram ->
                 val program = viewModel.resolveProgramForRun(baseProgram)
-                viewModel.ensureFixedGripSequenceSeeded(program)
-                val connected = viewModel.connectionState.value is ConnectionState.Connected
-                screen = when {
-                    !connected -> Screen.Connect(program)
-                    program.usesFixedGripSequence -> Screen.Running(program, null, null)
-                    else -> Screen.HoldTypeSelect(program)
+                if (program == null) {
+                    unconfiguredProgram = baseProgram
+                } else {
+                    val connected = viewModel.connectionState.value is ConnectionState.Connected
+                    screen = if (connected) Screen.Running(program) else Screen.Connect(program)
                 }
             },
             onOpenProgramGripConfig = { program -> screen = Screen.ProgramGripConfig(program) },
@@ -87,13 +91,7 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
                 is ConnectionState.Connected -> {
                     val pending = s.pendingProgram
                     if (pending != null) {
-                        LaunchedEffect(pending) {
-                            screen = if (pending.usesFixedGripSequence) {
-                                Screen.Running(pending, null, null)
-                            } else {
-                                Screen.HoldTypeSelect(pending)
-                            }
-                        }
+                        LaunchedEffect(pending) { screen = Screen.Running(pending) }
                     } else {
                         DeviceScreen(viewModel = viewModel, device = cs.device, onBack = { screen = Screen.Home })
                     }
@@ -106,26 +104,9 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
             }
         }
 
-        is Screen.HoldTypeSelect -> HoldTypeSelectScreen(
-            viewModel = viewModel,
-            program = s.program,
-            onBack = { screen = Screen.Home },
-            onSelect = { holdType -> screen = Screen.GripVariantSelect(s.program, holdType) },
-        )
-
-        is Screen.GripVariantSelect -> GripVariantSelectScreen(
-            viewModel = viewModel,
-            program = s.program,
-            holdType = s.holdType,
-            onBack = { screen = Screen.HoldTypeSelect(s.program) },
-            onSelect = { variant, hand -> screen = Screen.Running(s.program, variant, hand) },
-        )
-
         is Screen.Running -> ProgramRunnerScreen(
             viewModel = viewModel,
             program = s.program,
-            gripVariant = s.gripVariant,
-            selectedHand = s.hand,
             onFinished = { screen = Screen.Home },
         )
 
@@ -140,7 +121,26 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
             viewModel = viewModel,
             updateStatus = updateStatus,
             onCheckUpdates = onCheckUpdates,
+            onOpenHolds = { screen = Screen.HoldsSettings },
             onBack = { screen = Screen.Home },
+        )
+        Screen.HoldsSettings -> HoldsSettingsScreen(viewModel = viewModel, onBack = { screen = Screen.Settings })
+    }
+
+    unconfiguredProgram?.let { program ->
+        AlertDialog(
+            onDismissRequest = { unconfiguredProgram = null },
+            title = { Text("No grips configured") },
+            text = { Text("No grips added to ${program.title}. Add it in the settings.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        unconfiguredProgram = null
+                        screen = Screen.ProgramGripConfig(program)
+                    },
+                ) { Text("Open settings") }
+            },
+            dismissButton = { TextButton(onClick = { unconfiguredProgram = null }) { Text("Cancel") } },
         )
     }
 }

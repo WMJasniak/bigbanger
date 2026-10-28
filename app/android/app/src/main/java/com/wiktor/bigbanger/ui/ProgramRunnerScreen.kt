@@ -31,7 +31,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
 import com.wiktor.bigbanger.ble.ConnectionState
 import com.wiktor.bigbanger.training.GripVariant
-import com.wiktor.bigbanger.training.Hand
 import com.wiktor.bigbanger.training.ProgramDefinition
 import com.wiktor.bigbanger.training.ProgramRunner
 import com.wiktor.bigbanger.training.ProgramStep
@@ -45,27 +44,24 @@ private const val RUNNER_CHART_WINDOW_SECONDS = 30f
 fun ProgramRunnerScreen(
     viewModel: BigBangerViewModel,
     program: ProgramDefinition,
-    gripVariant: GripVariant?,
-    selectedHand: Hand?,
     onFinished: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
 
-    // A fixed-sequence step (No Hangs, or any program with a configured grip sequence)
-    // names its own grip via holdTypeName/gripLabel; otherwise fall back to whatever was
-    // picked once for the whole run.
+    // Every step in a resolved program names its own grip via holdTypeName/gripLabel --
+    // resolveProgramForRun always expands against a configured grip sequence.
     fun resolveVariant(step: ProgramStep): GripVariant? {
-        val holdTypeName = step.holdTypeName ?: return gripVariant
-        val label = step.gripLabel ?: return gripVariant
+        val holdTypeName = step.holdTypeName ?: return null
+        val label = step.gripLabel ?: return null
         val holdType = viewModel.trainingRepo.holdTypes.value.firstOrNull { it.name == holdTypeName } ?: return null
         return viewModel.trainingRepo.gripVariants.value.firstOrNull { it.holdTypeId == holdType.id && it.name == label }
     }
 
-    val runner = remember(program, gripVariant, selectedHand) {
+    val runner = remember(program) {
         ProgramRunner(
             program = program,
             maxKgForStep = { step: ProgramStep ->
-                val hand = step.hand ?: selectedHand
+                val hand = step.hand
                 val variant = resolveVariant(step)
                 if (variant != null && hand != null) viewModel.trainingRepo.currentMaxKg(variant.id, hand) else null
             },
@@ -109,7 +105,6 @@ fun ProgramRunnerScreen(
                 isReady = true
                 runner.start()
             },
-            onCancel = onFinished,
         )
         return
     }
@@ -215,7 +210,7 @@ fun ProgramRunnerScreen(
 
     val decision = phase as? RunnerPhase.AwaitingAttemptDecision
     val decisionVariant = decision?.let { resolveVariant(step) }
-    val decisionHand = step.hand ?: selectedHand
+    val decisionHand = step.hand
     if (decision != null && decisionVariant != null && decisionHand != null) {
         AttemptDecisionDialog(
             peakKg = decision.peakKg,
@@ -238,9 +233,8 @@ private fun gripHandLabel(step: ProgramStep): String? {
 }
 
 @Composable
-private fun ReadyGate(program: ProgramDefinition, onTare: () -> Unit, onStart: () -> Unit, onCancel: () -> Unit) {
+private fun ReadyGate(program: ProgramDefinition, onTare: () -> Unit, onStart: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onCancel) { Text("Back") }
         Text(
             program.title,
             style = MaterialTheme.typography.headlineSmall,
