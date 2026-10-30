@@ -12,8 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -25,6 +28,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,11 +39,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -216,7 +224,6 @@ fun ProgramGripConfigScreen(viewModel: BigBangerViewModel, program: ProgramDefin
                     label = "Work (seconds)",
                     value = timing.workSeconds,
                     min = 1,
-                    step = 5,
                     onValueChange = { setTiming(timing.copy(workSeconds = it)) },
                 )
             }
@@ -225,7 +232,6 @@ fun ProgramGripConfigScreen(viewModel: BigBangerViewModel, program: ProgramDefin
                     label = "Rest (seconds)",
                     value = timing.restSeconds,
                     min = 0,
-                    step = 10,
                     onValueChange = { setTiming(timing.copy(restSeconds = it)) },
                 )
             }
@@ -246,27 +252,50 @@ private fun formatDuration(totalSeconds: Int): String {
     return if (minutes > 0) "${minutes}m ${seconds}s" else "${seconds}s"
 }
 
-/** [step] lets a field like Rest (seconds), which sits at 120 by default, move in
- * chunks instead of needing dozens of taps to get anywhere -- reps/attempts/sets fields
- * keep the default of 1, since those are usually small numbers where every unit counts. */
+/**
+ * No single tap increment is right for every field -- 1 took 30 taps to move Rest from
+ * 120 to 90, 10 overshot a field someone wants tuned to the second. So instead of
+ * guessing a step size, the number itself is directly editable: tap it, type the exact
+ * value, done. The +/- buttons stay for a quick +-1 nudge once you are close.
+ *
+ * Typing is tracked in its own local buffer and only committed (parsed, clamped, and
+ * pushed up via [onValueChange]) on the keyboard's Done action or on losing focus --
+ * not on every keystroke. Committing per-keystroke would round-trip the clamped value
+ * straight back into this field while mid-edit (e.g. typing "90" one digit at a time
+ * with [min] = 0: "9" commits fine, but clearing to type a fresh number passes through
+ * "" or a leading "0" that would otherwise snap back and fight the next digit).
+ */
 @Composable
-private fun StepperRow(label: String, value: Int, min: Int, step: Int = 1, onValueChange: (Int) -> Unit) {
+private fun StepperRow(label: String, value: Int, min: Int, onValueChange: (Int) -> Unit) {
+    var text by remember(value) { mutableStateOf(value.toString()) }
+    fun commit() {
+        val parsed = text.toIntOrNull()?.coerceAtLeast(min) ?: value
+        text = parsed.toString()
+        if (parsed != value) onValueChange(parsed)
+    }
+
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { onValueChange((value - step).coerceAtLeast(min)) }) {
+            IconButton(onClick = { onValueChange((value - 1).coerceAtLeast(min)) }) {
                 Icon(Icons.Filled.Remove, contentDescription = "Decrease $label")
             }
-            Text(
-                "$value",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 4.dp),
+            OutlinedTextField(
+                value = text,
+                onValueChange = { new -> text = new.filter { it.isDigit() } },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.titleMedium.copy(textAlign = TextAlign.Center),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { commit() }),
+                modifier = Modifier
+                    .width(64.dp)
+                    .onFocusChanged { if (!it.isFocused) commit() },
             )
-            IconButton(onClick = { onValueChange(value + step) }) {
+            IconButton(onClick = { onValueChange(value + 1) }) {
                 Icon(Icons.Filled.Add, contentDescription = "Increase $label")
             }
         }

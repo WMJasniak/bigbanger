@@ -9,9 +9,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -20,10 +27,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,7 +61,17 @@ fun ProgramRunnerScreen(
     var mode by remember { mutableStateOf(TrainingMode.FULL) }
     var resolvedProgram by remember { mutableStateOf<ProgramDefinition?>(null) }
     var pendingMissingMax by remember { mutableStateOf<Pair<ProgramDefinition, List<BigBangerViewModel.MissingMax>>?>(null) }
+    // Attempts recorded this run (Max Testing only -- every other program's WORK steps
+    // have a target and never call onAttemptCompleted), so the session summary below
+    // can show and let you clean up just this run's own readings, not every one ever.
+    val recordedResultIds = remember { mutableStateListOf<String>() }
+    var showSummary by remember { mutableStateOf(false) }
     val runningProgram = resolvedProgram
+
+    if (showSummary) {
+        MaxTestingSummaryScreen(viewModel = viewModel, resultIds = recordedResultIds, onDone = onFinished)
+        return
+    }
 
     if (runningProgram == null) {
         BackHandler(onBack = onFinished)
@@ -105,7 +124,9 @@ fun ProgramRunnerScreen(
             onAttemptCompleted = { step, peak ->
                 val variant = resolveVariant(step)
                 val hand = step.hand
-                if (variant != null && hand != null) viewModel.trainingRepo.recordMaxTest(variant.id, hand, peak)
+                if (variant != null && hand != null) {
+                    recordedResultIds.add(viewModel.trainingRepo.recordMaxTest(variant.id, hand, peak).id)
+                }
             },
         )
     }
@@ -128,14 +149,14 @@ fun ProgramRunnerScreen(
     LaunchedEffect(runner.phase) {
         if (runner.phase is RunnerPhase.Finished) {
             viewModel.trainingRepo.logSession(runningProgram.id)
-            onFinished()
+            if (recordedResultIds.isNotEmpty()) showSummary = true else onFinished()
         }
     }
 
-    BackHandler {
-        runner.cancel()
-        onFinished()
-    }
+    // Cancel goes through the same Finished handling above (just sets the phase rather
+    // than also navigating directly) so an early stop with a few attempts already
+    // recorded still gets the same chance to review/delete them.
+    BackHandler { runner.cancel() }
 
     val history by viewModel.weightHistory.collectAsStateWithLifecycle()
     val step = runner.currentStep
@@ -230,7 +251,7 @@ fun ProgramRunnerScreen(
                 Text(if (phase == RunnerPhase.Paused) "Resume" else "Pause")
             }
             Button(
-                onClick = { runner.cancel(); onFinished() },
+                onClick = { runner.cancel() },
                 modifier = Modifier.weight(1f),
             ) { Text("Cancel") }
         }
@@ -314,4 +335,60 @@ private fun MissingMaxDialog(
         confirmButton = { TextButton(onClick = onContinueAnyway) { Text("Continue anyway") } },
         dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
     )
+}
+
+/** Shown right after a Max Testing run (finished or cancelled early) that recorded at
+ * least one attempt -- scoped to just this run's own readings via [resultIds], not
+ * every max test ever recorded for these grips, so there is one clear place to catch a
+ * slipped grip or false start before it skews the rolling average in Stats. Deleting
+ * here uses the same TrainingRepo call Stats itself uses, so either place stays correct. */
+@Composable
+private fun MaxTestingSummaryScreen(viewModel: BigBangerViewModel, resultIds: List<String>, onDone: () -> Unit) {
+    BackHandler(onBack = onDone)
+
+    val allResults by viewModel.trainingRepo.maxResults.collectAsStateWithLifecycle()
+    val variants by viewModel.trainingRepo.gripVariants.collectAsStateWithLifecycle()
+    val holdTypes by viewModel.trainingRepo.holdTypes.collectAsStateWithLifecycle()
+    val results = resultIds.mapNotNull { id -> allResults.firstOrNull { it.id == id } }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Session results", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Delete any reading that shouldn't count (slipped grip, false start, ...).",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+        )
+
+        if (results.isEmpty()) {
+            Text("Nothing left -- everything was deleted.", style = MaterialTheme.typography.bodyMedium)
+        }
+
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            items(results, key = { it.id }) { result ->
+                val variant = variants.firstOrNull { it.id == result.gripVariantId }
+                val holdName = variant?.let { v -> holdTypes.firstOrNull { it.id == v.holdTypeId }?.name }
+                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(
+                                "${holdName ?: "?"} · ${variant?.name ?: "?"} — ${result.hand.displayLabel}",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text("${"%.1f".format(result.peakKg)} kg", style = MaterialTheme.typography.titleMedium)
+                        }
+                        IconButton(onClick = { viewModel.trainingRepo.deleteMaxResult(result.id) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete this reading")
+                        }
+                    }
+                }
+            }
+        }
+
+        Button(onClick = onDone, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Text("Done") }
+    }
 }

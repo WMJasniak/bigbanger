@@ -12,8 +12,8 @@ android {
         applicationId = "com.wiktor.bigbanger"
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "0.4.12"
+        versionCode = 28
+        versionName = "0.4.13"
     }
 
     buildTypes {
