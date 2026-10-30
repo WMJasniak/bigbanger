@@ -9,9 +9,11 @@ import com.wiktor.bigbanger.ble.ProgressorBleManager
 import com.wiktor.bigbanger.ble.ScaleSource
 import com.wiktor.bigbanger.ble.SimulatedScaleSource
 import com.wiktor.bigbanger.ble.WeightSample
+import com.wiktor.bigbanger.training.Hand
 import com.wiktor.bigbanger.training.ProgramDefinition
 import com.wiktor.bigbanger.training.ProgramId
 import com.wiktor.bigbanger.training.Programs
+import com.wiktor.bigbanger.training.StepKind
 import com.wiktor.bigbanger.training.TrainingMode
 import com.wiktor.bigbanger.training.TrainingRepo
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -103,10 +105,35 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
         val timing = trainingRepo.timingFor(program.id)
         return when (program.id) {
             ProgramId.NO_HANGS -> Programs.buildNoHangs(legs, timing, mode)
-            ProgramId.MAX_HANGS -> Programs.expandWithGripSequence(Programs.buildMaxHangsBase(timing, mode), legs)
-            ProgramId.MAX_TESTING -> Programs.expandWithGripSequence(Programs.buildMaxTestingBase(timing, mode), legs)
-            ProgramId.WARM_UP -> Programs.expandWithGripSequence(Programs.buildWarmUpBase(timing, mode), legs)
+            ProgramId.MAX_HANGS ->
+                Programs.expandWithGripSequence(Programs.buildMaxHangsBase(timing, mode), legs, timing.restSeconds)
+            ProgramId.MAX_TESTING ->
+                Programs.expandWithGripSequence(Programs.buildMaxTestingBase(timing, mode), legs, timing.restSeconds)
+            ProgramId.WARM_UP ->
+                Programs.expandWithGripSequence(Programs.buildWarmUpBase(timing, mode), legs, timing.restSeconds)
         }
+    }
+
+    /** One grip/hand a program's resolved steps need a real max for, but don't have one. */
+    data class MissingMax(val holdTypeName: String, val gripLabel: String, val hand: Hand)
+
+    /** Scans [resolved]'s own steps (already expanded against a configured grip
+     * sequence) for a WORK step with a target that has no recorded max yet -- used
+     * right before starting a run, to prompt for Max Testing instead of silently
+     * running with no real band to aim for. */
+    fun missingMaxesFor(resolved: ProgramDefinition): List<MissingMax> {
+        return resolved.steps
+            .filter { it.kind == StepKind.WORK && it.percentOfMax != null }
+            .mapNotNull { step ->
+                val holdTypeName = step.holdTypeName ?: return@mapNotNull null
+                val gripLabel = step.gripLabel ?: return@mapNotNull null
+                val hand = step.hand ?: return@mapNotNull null
+                val holdType = trainingRepo.holdTypes.value.firstOrNull { it.name == holdTypeName } ?: return@mapNotNull null
+                val variant = trainingRepo.gripVariants.value
+                    .firstOrNull { it.holdTypeId == holdType.id && it.name == gripLabel } ?: return@mapNotNull null
+                if (trainingRepo.currentMaxKg(variant.id, hand) == null) MissingMax(holdTypeName, gripLabel, hand) else null
+            }
+            .distinct()
     }
 
     /** Lets the Program Runner nudge the simulated signal toward the active target band; no-op on the real scale. */

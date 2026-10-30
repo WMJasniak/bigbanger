@@ -53,6 +53,7 @@ class TrainingRepo(context: Context) {
 
     fun load() {
         if (!file.exists()) return
+        var needsSaveAfterLoad = false
         try {
             val root = JSONObject(file.readText())
 
@@ -69,7 +70,7 @@ class TrainingRepo(context: Context) {
             }
 
             val results = root.optJSONArray("maxResults") ?: JSONArray()
-            _maxResults.value = (0 until results.length()).map {
+            val loadedResults = (0 until results.length()).map {
                 val r = results.getJSONObject(it)
                 MaxTestResult(
                     id = r.getString("id"),
@@ -79,6 +80,12 @@ class TrainingRepo(context: Context) {
                     timestampMs = r.getLong("timestampMs"),
                 )
             }
+            // One-time cleanup: earlier versions seeded a placeholder 1kg "max" per
+            // default grip/hand so a target band existed before any real Max Testing --
+            // a real measurement is never going to land on exactly 1.000000kg, so this
+            // is a safe way to drop the placeholders without touching real ones.
+            _maxResults.value = loadedResults.filterNot { it.peakKg == 1f }
+            if (_maxResults.value.size != loadedResults.size) needsSaveAfterLoad = true
 
             val sessionArray = root.optJSONArray("sessions") ?: JSONArray()
             _sessions.value = (0 until sessionArray.length()).map {
@@ -117,6 +124,7 @@ class TrainingRepo(context: Context) {
         } catch (_: Exception) {
             // Corrupt or unreadable state: start fresh rather than crash.
         }
+        if (needsSaveAfterLoad) save()
     }
 
     private fun save() {
@@ -269,14 +277,13 @@ class TrainingRepo(context: Context) {
      * it works before the user ever opens its settings, instead of starting out empty like
      * every other program. Seeded once, only the first time its sequence is missing
      * entirely -- not reseeded if the user later clears it on purpose (an explicitly empty
-     * list stays empty).
+     * list stays empty). Does not invent a max for any of them -- a real one, or an
+     * explicit choice to continue without one, is required before training (see
+     * BigBangerViewModel.missingMaxesFor).
      */
     fun ensureNoHangsDefaultSeeded() {
         if (_programGripSequences.value.containsKey(ProgramId.NO_HANGS)) return
-        val ids = Programs.NO_HANGS_DEFAULT_GRIPS.map { (gripName, _) ->
-            ensureGripVariantWithSeedMax(Programs.NO_HANGS_HOLD_TYPE, gripName, Hand.LEFT, 1f)
-            ensureGripVariantWithSeedMax(Programs.NO_HANGS_HOLD_TYPE, gripName, Hand.RIGHT, 1f).id
-        }
+        val ids = Programs.NO_HANGS_DEFAULT_GRIPS.map { (gripName, _) -> ensureGripVariant(Programs.NO_HANGS_HOLD_TYPE, gripName).id }
         setGripSequence(ProgramId.NO_HANGS, ids)
     }
 
@@ -285,6 +292,11 @@ class TrainingRepo(context: Context) {
         _maxResults.update { it + result }
         save()
         return result
+    }
+
+    fun deleteMaxResult(id: String) {
+        _maxResults.update { list -> list.filterNot { it.id == id } }
+        save()
     }
 
     fun logSession(programId: ProgramId) {
@@ -305,18 +317,11 @@ class TrainingRepo(context: Context) {
     fun resultsFor(gripVariantId: String, hand: Hand): List<MaxTestResult> =
         _maxResults.value.filter { it.gripVariantId == gripVariantId && it.hand == hand }.sortedByDescending { it.timestampMs }
 
-    /**
-     * Looks up a hold type and grip variant by exact name, creating either if missing,
-     * and seeds a [seedPeakKg] max for [hand] if there is none yet -- used by programs
-     * with a fixed grip sequence (e.g. No Hangs) so their target bands work before the
-     * user has run real Max Testing against that specific position+hand. Never
-     * overwrites an existing max.
-     */
-    fun ensureGripVariantWithSeedMax(holdTypeName: String, variantName: String, hand: Hand, seedPeakKg: Float): GripVariant {
+    /** Looks up a hold type and grip variant by exact name, creating either if missing --
+     * used to seed No Hangs' default grip catalog entries without inventing a max for them. */
+    fun ensureGripVariant(holdTypeName: String, variantName: String): GripVariant {
         val holdType = _holdTypes.value.firstOrNull { it.name == holdTypeName } ?: addHoldType(holdTypeName)
-        val variant = _gripVariants.value.firstOrNull { it.holdTypeId == holdType.id && it.name == variantName }
+        return _gripVariants.value.firstOrNull { it.holdTypeId == holdType.id && it.name == variantName }
             ?: addGripVariant(holdType.id, variantName)
-        if (currentMaxKg(variant.id, hand) == null) recordMaxTest(variant.id, hand, seedPeakKg)
-        return variant
     }
 }

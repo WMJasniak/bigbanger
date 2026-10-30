@@ -140,20 +140,25 @@ object Programs {
      * each grip gets its own rep count (see [NO_HANGS_DEFAULT_GRIPS]) when [timing.reps]
      * is 0 ("use protocol defaults"), or [timing.reps] uniformly for every grip otherwise
      * -- either way cut by [mode] afterward. Each grip is still trained one hand at a
-     * time (left, then right) with one PREP per leg.
+     * time (left, then right); only the very first leg gets a PREP beat (every later leg
+     * already gets one for free, since the REST before it previews the upcoming grip --
+     * see ui/ProgramRunnerScreen.kt's "Next: ..." text -- so a second "get ready" after
+     * that REST would just be redundant downtime).
      */
     fun buildNoHangs(legs: List<Pair<HoldType, GripVariant>>, timing: ProgramTiming, mode: TrainingMode): ProgramDefinition {
         val handLegs = legs.flatMap { (holdType, variant) -> Hand.entries.map { hand -> Triple(holdType, variant, hand) } }
         val steps = buildList {
             handLegs.forEachIndexed { legIndex, (holdType, variant, hand) ->
-                add(
-                    ProgramStep(
-                        kind = StepKind.PREP,
-                        durationSeconds = NO_HANGS_PREP_SECONDS,
-                        gripLabel = variant.name,
-                        hand = hand,
-                    ),
-                )
+                if (legIndex == 0) {
+                    add(
+                        ProgramStep(
+                            kind = StepKind.PREP,
+                            durationSeconds = NO_HANGS_PREP_SECONDS,
+                            gripLabel = variant.name,
+                            hand = hand,
+                        ),
+                    )
+                }
                 val baseReps = if (timing.reps > 0) timing.reps else noHangsProtocolRepsFor(variant.name)
                 val reps = scaleReps(baseReps, mode)
                 repeat(reps) { rep ->
@@ -181,16 +186,21 @@ object Programs {
      * Expands [base]'s own step template into a run through [legs] in the given order,
      * each grip trained one hand at a time (left then right) -- the same shape
      * [buildNoHangs] uses, just with [base]'s template repeated identically for every
-     * leg instead of a per-grip rep count. [legs] must be non-empty; callers check for
-     * an unconfigured (empty) grip sequence before resolving (see
+     * leg instead of a per-grip rep count. Only the first leg gets a PREP beat, same
+     * reasoning as [buildNoHangs] -- every later leg's preceding REST already previews
+     * it. [legGapSeconds] is the rest between legs (always [ProgramTiming.restSeconds],
+     * passed in rather than guessed from [base]'s own steps, which could have none at
+     * all if a program's attempt/rep count is cut to 1). [legs] must be non-empty;
+     * callers check for an unconfigured (empty) grip sequence before resolving (see
      * [BigBangerViewModel.resolveProgramForRun]).
      */
-    fun expandWithGripSequence(base: ProgramDefinition, legs: List<Pair<HoldType, GripVariant>>): ProgramDefinition {
+    fun expandWithGripSequence(base: ProgramDefinition, legs: List<Pair<HoldType, GripVariant>>, legGapSeconds: Int): ProgramDefinition {
         val handLegs = legs.flatMap { (holdType, variant) -> Hand.entries.map { hand -> Triple(holdType, variant, hand) } }
-        val legGapSeconds = base.steps.firstOrNull { it.kind == StepKind.REST }?.durationSeconds ?: 60
         val steps = buildList {
             handLegs.forEachIndexed { legIndex, (holdType, variant, hand) ->
-                add(ProgramStep(kind = StepKind.PREP, durationSeconds = GRIP_SEQUENCE_PREP_SECONDS, gripLabel = variant.name, hand = hand))
+                if (legIndex == 0) {
+                    add(ProgramStep(kind = StepKind.PREP, durationSeconds = GRIP_SEQUENCE_PREP_SECONDS, gripLabel = variant.name, hand = hand))
+                }
                 base.steps.forEach { templateStep ->
                     add(
                         if (templateStep.kind == StepKind.WORK) {

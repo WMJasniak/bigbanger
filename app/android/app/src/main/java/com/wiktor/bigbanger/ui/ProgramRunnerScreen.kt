@@ -51,6 +51,7 @@ fun ProgramRunnerScreen(
     val scope = rememberCoroutineScope()
     var mode by remember { mutableStateOf(TrainingMode.FULL) }
     var resolvedProgram by remember { mutableStateOf<ProgramDefinition?>(null) }
+    var pendingMissingMax by remember { mutableStateOf<Pair<ProgramDefinition, List<BigBangerViewModel.MissingMax>>?>(null) }
     val runningProgram = resolvedProgram
 
     if (runningProgram == null) {
@@ -60,8 +61,24 @@ fun ProgramRunnerScreen(
             mode = mode,
             onModeChange = { mode = it },
             onTare = { viewModel.tare() },
-            onStart = { resolvedProgram = viewModel.resolveProgramForRun(program, mode) },
+            onStart = {
+                val resolved = viewModel.resolveProgramForRun(program, mode)
+                if (resolved != null) {
+                    val missing = viewModel.missingMaxesFor(resolved)
+                    if (missing.isEmpty()) resolvedProgram = resolved else pendingMissingMax = resolved to missing
+                }
+            },
         )
+        pendingMissingMax?.let { (resolved, missing) ->
+            MissingMaxDialog(
+                missing = missing,
+                onContinueAnyway = {
+                    pendingMissingMax = null
+                    resolvedProgram = resolved
+                },
+                onCancel = { pendingMissingMax = null },
+            )
+        }
         return
     }
 
@@ -85,6 +102,11 @@ fun ProgramRunnerScreen(
             scope = scope,
             onSetMeasuring = { active -> if (active) viewModel.startMeasurement() else viewModel.stopMeasurement() },
             currentHistory = { viewModel.weightHistory.value },
+            onAttemptCompleted = { step, peak ->
+                val variant = resolveVariant(step)
+                val hand = step.hand
+                if (variant != null && hand != null) viewModel.trainingRepo.recordMaxTest(variant.id, hand, peak)
+            },
         )
     }
 
@@ -193,7 +215,6 @@ fun ProgramRunnerScreen(
             anchorFraction = 1f / 3f,
             windowSeconds = RUNNER_CHART_WINDOW_SECONDS,
             isWorking = step.kind == StepKind.WORK,
-            frozen = phase is RunnerPhase.AwaitingAttemptDecision,
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
 
@@ -213,24 +234,6 @@ fun ProgramRunnerScreen(
                 modifier = Modifier.weight(1f),
             ) { Text("Cancel") }
         }
-    }
-
-    val decision = phase as? RunnerPhase.AwaitingAttemptDecision
-    val decisionVariant = decision?.let { resolveVariant(step) }
-    val decisionHand = step.hand
-    if (decision != null && decisionVariant != null && decisionHand != null) {
-        AttemptDecisionDialog(
-            peakKg = decision.peakKg,
-            currentMaxKg = viewModel.trainingRepo.currentMaxKg(decisionVariant.id, decisionHand),
-            onSave = {
-                runner.resolveAttempt(save = true) { peak ->
-                    viewModel.trainingRepo.recordMaxTest(decisionVariant.id, decisionHand, peak)
-                }
-            },
-            onRetry = { runner.retryAttempt() },
-            onSkip = { runner.resolveAttempt(save = false) {} },
-            onFinishEarly = { runner.finishEarly() },
-        )
     }
 }
 
@@ -282,34 +285,33 @@ private fun ReadyGate(
 }
 
 @Composable
-private fun AttemptDecisionDialog(
-    peakKg: Float,
-    currentMaxKg: Float?,
-    onSave: () -> Unit,
-    onRetry: () -> Unit,
-    onSkip: () -> Unit,
-    onFinishEarly: () -> Unit,
+private fun MissingMaxDialog(
+    missing: List<BigBangerViewModel.MissingMax>,
+    onContinueAnyway: () -> Unit,
+    onCancel: () -> Unit,
 ) {
     AlertDialog(
-        onDismissRequest = onSkip,
-        title = { Text("Attempt result") },
+        onDismissRequest = onCancel,
+        title = { Text("No max recorded") },
         text = {
             Column {
-                Text("Peak: ${"%.1f".format(peakKg)} kg")
+                Text("Run Max Testing first for an accurate target for:")
+                missing.forEach { m ->
+                    Text(
+                        "${m.holdTypeName} · ${m.gripLabel} — ${m.hand.displayLabel}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
                 Text(
-                    if (currentMaxKg != null) "Current max: ${"%.1f".format(currentMaxKg)} kg" else "No max recorded yet",
-                    style = MaterialTheme.typography.bodyMedium,
+                    "Continuing now runs those with a plain timer and no target band.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
                 )
             }
         },
-        confirmButton = { Button(onClick = onSave) { Text("Save") } },
-        dismissButton = {
-            Row {
-                TextButton(onClick = onRetry) { Text("Retry") }
-                TextButton(onClick = onSkip) { Text("Skip") }
-                TextButton(onClick = onFinishEarly) { Text("Finish testing") }
-            }
-        },
+        confirmButton = { TextButton(onClick = onContinueAnyway) { Text("Continue anyway") } },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
     )
 }

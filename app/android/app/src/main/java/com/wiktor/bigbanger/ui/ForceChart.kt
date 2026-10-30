@@ -61,11 +61,6 @@ fun ForceChart(
     /** true = tint the panel warm (actively working), false = tint it cool (resting/
      * prepping), null = no tint (plain reading, e.g. Raw Data, where neither applies). */
     isWorking: Boolean? = null,
-    /** true pins the view to the last real sample instead of idling forward in real
-     * time -- used while a decision dialog sits over the chart (e.g. Max Testing's
-     * attempt result) so the trace underneath stays visibly still, not scrolling with
-     * no new data to show for it. */
-    frozen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val basePanelColor = MaterialTheme.colorScheme.surfaceVariant
@@ -101,7 +96,7 @@ fun ForceChart(
     Canvas(modifier = modifier.fillMaxSize().clipToBounds()) {
         drawRoundRect(color = panelColor, cornerRadius = CornerRadius(20f, 20f))
 
-        val now = (lastSample?.timestampSeconds ?: 0f) + (if (frozen) 0f else idleElapsedSeconds.floatValue)
+        val now = (lastSample?.timestampSeconds ?: 0f) + idleElapsedSeconds.floatValue
         val windowStart = now - windowSeconds * anchorFraction
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 
