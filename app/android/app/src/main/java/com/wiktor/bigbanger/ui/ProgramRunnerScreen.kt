@@ -1,6 +1,7 @@
 package com.wiktor.bigbanger.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
@@ -34,8 +36,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
@@ -48,8 +50,13 @@ import com.wiktor.bigbanger.training.RunnerPhase
 import com.wiktor.bigbanger.training.StepKind
 import com.wiktor.bigbanger.training.TrainingMode
 
-/** ~1 WORK hold of past, ~1 REST of future preview, either side of the live point. */
-private const val RUNNER_CHART_WINDOW_SECONDS = 30f
+/** ~1 WORK hold of past, ~1 REST of future preview, either side of the live point.
+ * 20s (not 30s) so the roll reads as about 1.5x livelier -- the same screen width now
+ * covers less time, so the same data moves across it faster. */
+private const val RUNNER_CHART_WINDOW_SECONDS = 20f
+
+private val PREP_REST_BADGE_COLOR = Color(0xFF1565C0)
+private val WORK_BADGE_COLOR = Color(0xFFE1551F)
 
 @Composable
 fun ProgramRunnerScreen(
@@ -124,7 +131,9 @@ fun ProgramRunnerScreen(
             onAttemptCompleted = { step, peak ->
                 val variant = resolveVariant(step)
                 val hand = step.hand
-                if (variant != null && hand != null) {
+                // Never record against the demo signal -- testing the app's flow
+                // without the real scale should not pollute real training history.
+                if (variant != null && hand != null && !viewModel.isSimulatedSource) {
                     recordedResultIds.add(viewModel.trainingRepo.recordMaxTest(variant.id, hand, peak).id)
                 }
             },
@@ -181,15 +190,17 @@ fun ProgramRunnerScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Text(
-            when (step.kind) {
-                StepKind.WORK -> "Work"
-                StepKind.REST -> "Rest"
-                StepKind.PREP -> "Get ready"
-            },
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(top = 16.dp),
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PhaseBadge(kind = step.kind)
+            Text(
+                if (phase == RunnerPhase.ConnectionLost) "--" else "${runner.remainingSeconds}s",
+                style = MaterialTheme.typography.displayMedium,
+            )
+        }
 
         gripHandText?.let {
             Text(
@@ -197,7 +208,7 @@ fun ProgramRunnerScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = if (isRest) FontWeight.Normal else FontWeight.Bold,
                 color = if (isRest) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = 12.dp),
             )
         }
 
@@ -208,16 +219,9 @@ fun ProgramRunnerScreen(
         if (phase == RunnerPhase.ConnectionLost) {
             Text(
                 "Scale disconnected -- turn it back on to continue. Your progress is saved.",
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(vertical = 16.dp),
-            )
-        } else {
-            Text(
-                "${runner.remainingSeconds}s",
-                style = MaterialTheme.typography.displayMedium,
-                textAlign = TextAlign.End,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                modifier = Modifier.padding(top = 8.dp),
             )
         }
 
@@ -261,6 +265,24 @@ fun ProgramRunnerScreen(
 private fun gripHandLabel(step: ProgramStep): String? {
     val grip = step.gripLabel ?: return null
     return if (step.hand != null) "$grip — ${step.hand.displayLabel}" else grip
+}
+
+/** The one thing to glance at from across the room: what to do right now. PREP and REST
+ * share a color since both mean "not pulling yet" -- only WORK ("Pull") gets its own. */
+@Composable
+private fun PhaseBadge(kind: StepKind) {
+    val (text, color) = when (kind) {
+        StepKind.PREP -> "Get ready" to PREP_REST_BADGE_COLOR
+        StepKind.REST -> "Rest" to PREP_REST_BADGE_COLOR
+        StepKind.WORK -> "Pull" to WORK_BADGE_COLOR
+    }
+    Box(
+        modifier = Modifier
+            .background(color = color, shape = RoundedCornerShape(16.dp))
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+    ) {
+        Text(text, style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
+    }
 }
 
 @Composable

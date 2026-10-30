@@ -78,6 +78,11 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
         simulatedSource.connect(SimulatedScaleSource.FAKE_DEVICE)
     }
 
+    /** True while the demo signal is the active source -- used to skip persisting a Max
+     * Testing attempt as a real max, so testing the app's flow without the real scale
+     * never pollutes real training history with made-up numbers. */
+    val isSimulatedSource: Boolean get() = activeSource is SimulatedScaleSource
+
     /** True once at least one of a program's configured grips is enabled -- used before
      * ever navigating anywhere to decide whether to prompt the user to its settings
      * instead. Independent of [TrainingMode], which only ever scales reps, never grips. */
