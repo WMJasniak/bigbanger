@@ -284,7 +284,7 @@ private fun PhaseBadge(kind: StepKind) {
     Box(
         modifier = Modifier
             .background(color = color, shape = shape)
-            .border(width = 2.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f), shape = shape)
+            .border(width = 3.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f), shape = shape)
             .padding(horizontal = 24.dp, vertical = 14.dp),
     ) {
         Text(text, style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)

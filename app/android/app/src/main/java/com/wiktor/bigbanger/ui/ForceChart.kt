@@ -205,7 +205,7 @@ fun ForceChart(
             drawPath(path = bottomEdgePath, color = bandEdgeColor, style = Stroke(width = 5f, join = StrokeJoin.Round))
         }
 
-        if (visible.size >= 2) {
+        if (visible.isNotEmpty()) {
             val linePath = Path()
             val fillPath = Path()
             var started = false
@@ -222,7 +222,25 @@ fun ForceChart(
                     fillPath.lineTo(x, y)
                 }
             }
-            fillPath.lineTo(xOf(visible.last().timestampSeconds), size.height)
+
+            // The line's tip (and the dot) used to sit exactly on the last *real*
+            // sample -- which, between samples, is always a little behind "now" and
+            // held perfectly still until the next one landed, then visibly jumped.
+            // Real samples arrive at whatever rate the hardware/BLE link delivers them,
+            // nowhere near the ~60fps "now" now advances at, so that stillness-then-jump
+            // was obvious against the now-smoothly-scrolling background. Extending the
+            // line to a synthetic point at exactly xOf(now) -- its kg linearly
+            // projected from the recent trend -- keeps the tip gliding every frame
+            // instead. The projection is a least-squares slope over the last few real
+            // samples (steadier than just the last two, which noise alone can swing
+            // wildly frame to frame) and the forward projection distance is capped at
+            // 0.5s so a stalled connection makes it go flat, not careen on a stale slope.
+            val liveX = xOf(now)
+            val liveKg = extrapolatedKg(visible, now)
+            val liveY = yOf(liveKg)
+            linePath.lineTo(liveX, liveY)
+            fillPath.lineTo(liveX, liveY)
+            fillPath.lineTo(liveX, size.height)
             fillPath.close()
 
             drawPath(
@@ -234,9 +252,7 @@ fun ForceChart(
                 color = lineColor,
                 style = Stroke(width = 5f, cap = StrokeCap.Round, join = StrokeJoin.Round),
             )
-
-            val last = visible.last()
-            drawCircle(color = lineColor, radius = 7f, center = Offset(xOf(last.timestampSeconds), yOf(last.kilograms)))
+            drawCircle(color = lineColor, radius = 7f, center = Offset(liveX, liveY))
         }
     }
 }
@@ -265,6 +281,33 @@ private fun smoothedStripAt(sorted: List<TargetSegment>, t: Float): Pair<Float, 
         return lerp(current.centerKg, next.centerKg, eased) to lerp(current.halfWidthKg, next.halfWidthKg, eased)
     }
     return current.centerKg to current.halfWidthKg
+}
+
+/**
+ * Projects the live point's kg value forward from [visible]'s recent trend to [now],
+ * via a least-squares slope over its last few samples (at most 5 -- enough to steady
+ * the estimate against single-sample noise without smearing in a real direction
+ * change) capped to a 0.5s forward projection, so a real gap (a stalled connection, not
+ * just the normal wait between samples) makes the line go flat instead of continuing
+ * to extrapolate an increasingly stale slope indefinitely.
+ */
+private fun extrapolatedKg(visible: List<WeightSample>, now: Float): Float {
+    val last = visible.last()
+    val recent = visible.takeLast(5)
+    if (recent.size < 2) return last.kilograms
+    val tMean = recent.sumOf { it.timestampSeconds.toDouble() } / recent.size
+    val kMean = recent.sumOf { it.kilograms.toDouble() } / recent.size
+    var num = 0.0
+    var den = 0.0
+    for (s in recent) {
+        val dt = s.timestampSeconds - tMean
+        num += dt * (s.kilograms - kMean)
+        den += dt * dt
+    }
+    if (den < 1e-6) return last.kilograms
+    val slope = (num / den).toFloat()
+    val gap = (now - last.timestampSeconds).coerceIn(0f, 0.5f)
+    return last.kilograms + slope * gap
 }
 
 /** An S-shaped ease from 0 to 1, reading the same as a sigmoid for this purpose. */
