@@ -104,6 +104,17 @@ fun ForceChart(
         }
     }
 
+    // Reused across every draw instead of allocating fresh Path/ArrayList objects each
+    // time -- with the clock now advancing (and so redrawing) every display frame
+    // rather than only on a new sample, that would otherwise be 60+ short-lived native
+    // Skia objects a second for the GC to catch up on.
+    val stripTopPath = remember { Path() }
+    val stripBottomPath = remember { Path() }
+    val stripFillPath = remember { Path() }
+    val stripBottomPoints = remember { ArrayList<Offset>() }
+    val linePath = remember { Path() }
+    val lineFillPath = remember { Path() }
+
     // Compose does not clip a Canvas's drawing to its own bounds by default, so a
     // reading beyond the y-axis range (now fixed to the target, not the readout) would
     // otherwise paint past the chart's panel and onto whatever sits below it.
@@ -171,55 +182,67 @@ fun ForceChart(
         }
 
         if (sortedSegments.isNotEmpty()) {
+            // sortedSegments' offsets are relative to whichever sample was latest when
+            // the caller last computed targetTimeline -- i.e. this same lastSampleTime,
+            // not this chart's own now. Positioning the strip at xOf(now + t) looked
+            // right but silently canceled out: both the "now" being added here and the
+            // "now" xOf itself subtracts are the exact same value read at the same
+            // instant, so the result reduces to a function of t and constants alone --
+            // it could not move between frames no matter how smoothly now advances.
+            // xOf(lastSampleTime + t) does not cancel, since lastSampleTime only
+            // updates when a real sample arrives while now keeps gliding every frame
+            // in between -- which is what makes it actually scroll smoothly, in step
+            // with the line instead of visibly stepping once per sample like before.
+            val lastSampleTime = samples.lastOrNull()?.timestampSeconds ?: now
             val timeStart = -windowSeconds * anchorFraction
             val timeEnd = windowSeconds * (1f - anchorFraction)
-            val topEdgePath = Path()
-            val bottomEdgePath = Path()
-            val fillPath = Path()
-            val bottomPoints = ArrayList<Offset>((((timeEnd - timeStart) / STRIP_SAMPLE_STEP_SECONDS) + 2).toInt())
+            stripTopPath.reset()
+            stripBottomPath.reset()
+            stripFillPath.reset()
+            stripBottomPoints.clear()
             var started = false
             var t = timeStart
             while (t <= timeEnd) {
                 val (center, half) = smoothedStripAt(sortedSegments, t)
-                val x = xOf(now + t)
+                val x = xOf(lastSampleTime + t)
                 val topY = yOf(center + half)
                 val bottomY = yOf(center - half)
                 if (!started) {
-                    topEdgePath.moveTo(x, topY)
-                    bottomEdgePath.moveTo(x, bottomY)
-                    fillPath.moveTo(x, topY)
+                    stripTopPath.moveTo(x, topY)
+                    stripBottomPath.moveTo(x, bottomY)
+                    stripFillPath.moveTo(x, topY)
                     started = true
                 } else {
-                    topEdgePath.lineTo(x, topY)
-                    bottomEdgePath.lineTo(x, bottomY)
-                    fillPath.lineTo(x, topY)
+                    stripTopPath.lineTo(x, topY)
+                    stripBottomPath.lineTo(x, bottomY)
+                    stripFillPath.lineTo(x, topY)
                 }
-                bottomPoints.add(Offset(x, bottomY))
+                stripBottomPoints.add(Offset(x, bottomY))
                 t += STRIP_SAMPLE_STEP_SECONDS
             }
-            for (p in bottomPoints.asReversed()) fillPath.lineTo(p.x, p.y)
-            fillPath.close()
+            for (p in stripBottomPoints.asReversed()) stripFillPath.lineTo(p.x, p.y)
+            stripFillPath.close()
 
-            drawPath(path = fillPath, color = bandFillColor)
-            drawPath(path = topEdgePath, color = bandEdgeColor, style = Stroke(width = 5f, join = StrokeJoin.Round))
-            drawPath(path = bottomEdgePath, color = bandEdgeColor, style = Stroke(width = 5f, join = StrokeJoin.Round))
+            drawPath(path = stripFillPath, color = bandFillColor)
+            drawPath(path = stripTopPath, color = bandEdgeColor, style = Stroke(width = 5f, join = StrokeJoin.Round))
+            drawPath(path = stripBottomPath, color = bandEdgeColor, style = Stroke(width = 5f, join = StrokeJoin.Round))
         }
 
         if (visible.isNotEmpty()) {
-            val linePath = Path()
-            val fillPath = Path()
+            linePath.reset()
+            lineFillPath.reset()
             var started = false
             for (sample in visible) {
                 val x = xOf(sample.timestampSeconds)
                 val y = yOf(sample.kilograms)
                 if (!started) {
                     linePath.moveTo(x, y)
-                    fillPath.moveTo(x, size.height)
-                    fillPath.lineTo(x, y)
+                    lineFillPath.moveTo(x, size.height)
+                    lineFillPath.lineTo(x, y)
                     started = true
                 } else {
                     linePath.lineTo(x, y)
-                    fillPath.lineTo(x, y)
+                    lineFillPath.lineTo(x, y)
                 }
             }
 
@@ -239,12 +262,12 @@ fun ForceChart(
             val liveKg = extrapolatedKg(visible, now)
             val liveY = yOf(liveKg)
             linePath.lineTo(liveX, liveY)
-            fillPath.lineTo(liveX, liveY)
-            fillPath.lineTo(liveX, size.height)
-            fillPath.close()
+            lineFillPath.lineTo(liveX, liveY)
+            lineFillPath.lineTo(liveX, size.height)
+            lineFillPath.close()
 
             drawPath(
-                path = fillPath,
+                path = lineFillPath,
                 brush = Brush.verticalGradient(listOf(lineColor.copy(alpha = 0.35f), lineColor.copy(alpha = 0f))),
             )
             drawPath(

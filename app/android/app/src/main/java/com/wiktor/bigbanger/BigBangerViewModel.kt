@@ -12,6 +12,7 @@ import com.wiktor.bigbanger.ble.WeightSample
 import com.wiktor.bigbanger.training.Hand
 import com.wiktor.bigbanger.training.ProgramDefinition
 import com.wiktor.bigbanger.training.ProgramId
+import com.wiktor.bigbanger.training.ProgramStep
 import com.wiktor.bigbanger.training.Programs
 import com.wiktor.bigbanger.training.StepKind
 import com.wiktor.bigbanger.training.TrainingMode
@@ -108,7 +109,7 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
             .mapNotNull { variant -> trainingRepo.holdTypes.value.firstOrNull { it.id == variant.holdTypeId }?.let { it to variant } }
         if (legs.isEmpty()) return null
         val timing = trainingRepo.timingFor(program.id)
-        return when (program.id) {
+        val resolved = when (program.id) {
             ProgramId.NO_HANGS -> Programs.buildNoHangs(legs, timing, mode)
             ProgramId.MAX_HANGS ->
                 Programs.expandWithGripSequence(Programs.buildMaxHangsBase(timing, mode), legs, timing.restSeconds)
@@ -116,6 +117,19 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
                 Programs.expandWithGripSequence(Programs.buildMaxTestingBase(timing, mode), legs, timing.restSeconds)
             ProgramId.WARM_UP ->
                 Programs.expandWithGripSequence(Programs.buildWarmUpBase(timing, mode), legs, timing.restSeconds)
+        }
+        // None of the per-leg builders put a REST after the very last leg's very last
+        // rep -- that gap was always meant to be filled by the *next* leg's lead-in
+        // rest, so a program with only one leg configured (one grip, as in Max Hangs)
+        // ended the instant the last rep's timer hit zero, right as you were still
+        // pulling hard, instead of fading back to 0 first. Appending one more REST
+        // whenever the resolved program would otherwise end on a WORK step covers
+        // every program/leg-count combination in one place rather than special-casing
+        // each builder.
+        return if (resolved.steps.lastOrNull()?.kind == StepKind.WORK) {
+            resolved.copy(steps = resolved.steps + ProgramStep(kind = StepKind.REST, durationSeconds = timing.restSeconds))
+        } else {
+            resolved
         }
     }
 
