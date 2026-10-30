@@ -9,6 +9,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
@@ -21,7 +24,6 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.wiktor.bigbanger.ble.WeightSample
 import com.wiktor.bigbanger.training.TargetSegment
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import androidx.compose.ui.graphics.lerp as lerpColor
 
@@ -76,17 +78,29 @@ fun ForceChart(
     val bandEdgeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
     val sortedSegments = remember(targetTimeline) { targetTimeline.sortedBy { it.startOffsetSeconds } }
 
-    // Keeps the window scrolling at a real-time pace even with no new samples (e.g. a
-    // brief connection hiccup) instead of freezing on the last sample's device
-    // timestamp. Resets to 0 every time a genuinely new sample arrives.
-    val lastSample = samples.lastOrNull()
-    val idleElapsedSeconds = remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(lastSample) {
-        idleElapsedSeconds.floatValue = 0f
-        val startNanos = System.nanoTime()
+    // Advances every display frame by real elapsed time -- not by however the BLE
+    // samples themselves happen to arrive -- then nudges gently toward the latest real
+    // device timestamp each frame rather than snapping straight to it. A hard snap
+    // (the previous design: reset to 0 and recount from scratch on every single new
+    // sample) looked fine against the simulator's steady 100ms ticks, but the real
+    // scale's notifications land in bursts -- several samples processed in one frame,
+    // several frames with none -- and snapping to each one individually is what read
+    // as choppy. The 15%-per-frame correction still tracks the real clock (so a
+    // reconnect's fresh timestamp or a long gap gets caught up within a few frames)
+    // without visibly jumping on every burst.
+    var nowSeconds by remember { mutableFloatStateOf(samples.lastOrNull()?.timestampSeconds ?: 0f) }
+    val currentSamples by rememberUpdatedState(samples)
+    LaunchedEffect(Unit) {
+        var lastFrameNanos = withFrameNanos { it }
         while (isActive) {
-            delay(33)
-            idleElapsedSeconds.floatValue = (System.nanoTime() - startNanos) / 1_000_000_000f
+            withFrameNanos { frameNanos ->
+                val deltaSeconds = (frameNanos - lastFrameNanos) / 1_000_000_000f
+                lastFrameNanos = frameNanos
+                nowSeconds += deltaSeconds
+                currentSamples.lastOrNull()?.timestampSeconds?.let { latestDevice ->
+                    nowSeconds += (latestDevice - nowSeconds) * 0.15f
+                }
+            }
         }
     }
 
@@ -96,7 +110,7 @@ fun ForceChart(
     Canvas(modifier = modifier.fillMaxSize().clipToBounds()) {
         drawRoundRect(color = panelColor, cornerRadius = CornerRadius(20f, 20f))
 
-        val now = (lastSample?.timestampSeconds ?: 0f) + idleElapsedSeconds.floatValue
+        val now = nowSeconds
         val windowStart = now - windowSeconds * anchorFraction
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 

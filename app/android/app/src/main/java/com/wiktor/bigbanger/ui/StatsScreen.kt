@@ -1,40 +1,30 @@
 package com.wiktor.bigbanger.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Card
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
 import com.wiktor.bigbanger.training.GripVariant
 import com.wiktor.bigbanger.training.Hand
-import com.wiktor.bigbanger.training.MaxTestResult
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
-private val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-
+/** Just the headline numbers -- tap a grip to see its full max-testing history (see
+ * GripMaxHistoryScreen.kt), which is also where every reading's date lives; repeating
+ * "avg of last 3" on every single row would just be noise once said here, once. */
 @Composable
-fun StatsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit) {
+fun StatsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit, onOpenGripHistory: (GripVariant) -> Unit) {
     BackHandler(onBack = onBack)
 
     val holdTypes by viewModel.trainingRepo.holdTypes.collectAsStateWithLifecycle()
@@ -57,6 +47,13 @@ fun StatsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 24.dp),
             )
+        } else {
+            Text(
+                "Current max is the average of the last 3 Max Testing results. Tap a grip to see its full history.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 16.dp),
+            )
         }
 
         holdTypes.forEach { holdType ->
@@ -69,8 +66,7 @@ fun StatsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit) {
                 GripVariantStatsCard(
                     variant = variant,
                     currentMaxKg = { hand -> viewModel.trainingRepo.currentMaxKg(variant.id, hand) },
-                    resultsFor = { hand -> viewModel.trainingRepo.resultsFor(variant.id, hand) },
-                    onDeleteResult = { resultId -> viewModel.trainingRepo.deleteMaxResult(resultId) },
+                    onClick = { onOpenGripHistory(variant) },
                 )
             }
         }
@@ -78,69 +74,27 @@ fun StatsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit) {
 }
 
 @Composable
-private fun GripVariantStatsCard(
-    variant: GripVariant,
-    currentMaxKg: (Hand) -> Float?,
-    resultsFor: (Hand) -> List<MaxTestResult>,
-    onDeleteResult: (String) -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+private fun GripVariantStatsCard(variant: GripVariant, currentMaxKg: (Hand) -> Float?, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(variant.name, style = MaterialTheme.typography.titleMedium)
             Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                HandStatsColumn(
-                    hand = Hand.LEFT,
-                    currentMaxKg = currentMaxKg(Hand.LEFT),
-                    results = resultsFor(Hand.LEFT),
-                    onDeleteResult = onDeleteResult,
-                    modifier = Modifier.weight(1f),
-                )
-                HandStatsColumn(
-                    hand = Hand.RIGHT,
-                    currentMaxKg = currentMaxKg(Hand.RIGHT),
-                    results = resultsFor(Hand.RIGHT),
-                    onDeleteResult = onDeleteResult,
-                    modifier = Modifier.weight(1f),
-                )
+                HandMaxPreview(hand = Hand.LEFT, currentMaxKg = currentMaxKg(Hand.LEFT), modifier = Modifier.weight(1f))
+                HandMaxPreview(hand = Hand.RIGHT, currentMaxKg = currentMaxKg(Hand.RIGHT), modifier = Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun HandStatsColumn(
-    hand: Hand,
-    currentMaxKg: Float?,
-    results: List<MaxTestResult>,
-    onDeleteResult: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
+private fun HandMaxPreview(hand: Hand, currentMaxKg: Float?, modifier: Modifier = Modifier) {
     Column(modifier = modifier) {
         Text(hand.displayLabel, style = MaterialTheme.typography.bodyMedium)
         Text(
-            if (currentMaxKg != null) "${"%.1f".format(currentMaxKg)} kg (avg of last ${results.size.coerceAtMost(3)})" else "No max yet",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp, bottom = 6.dp),
+            if (currentMaxKg != null) "${"%.1f".format(currentMaxKg)} kg" else "No max yet",
+            style = MaterialTheme.typography.titleMedium,
+            color = if (currentMaxKg != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
         )
-        // The place to clean up a wrong reading (slipped grip, false start, etc.) --
-        // Max Testing itself no longer stops to ask after every attempt, it just keeps
-        // recording; this is where to delete one that shouldn't count.
-        results.take(5).forEach { result ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row {
-                    Text(dateFormat.format(Date(result.timestampMs)), style = MaterialTheme.typography.labelSmall)
-                    Text("  ${"%.1f".format(result.peakKg)} kg", style = MaterialTheme.typography.labelSmall)
-                }
-                IconButton(onClick = { onDeleteResult(result.id) }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Delete this reading")
-                }
-            }
-        }
     }
 }
-

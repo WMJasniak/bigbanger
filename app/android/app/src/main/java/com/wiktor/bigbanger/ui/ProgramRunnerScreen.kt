@@ -2,6 +2,7 @@ package com.wiktor.bigbanger.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,9 +52,9 @@ import com.wiktor.bigbanger.training.StepKind
 import com.wiktor.bigbanger.training.TrainingMode
 
 /** ~1 WORK hold of past, ~1 REST of future preview, either side of the live point.
- * 20s (not 30s) so the roll reads as about 1.5x livelier -- the same screen width now
- * covers less time, so the same data moves across it faster. */
-private const val RUNNER_CHART_WINDOW_SECONDS = 20f
+ * 15s (half the original 30s) so the roll reads as 2x livelier -- the same screen
+ * width now covers half the time, so the same data moves across it twice as fast. */
+private const val RUNNER_CHART_WINDOW_SECONDS = 15f
 
 private val PREP_REST_BADGE_COLOR = Color(0xFF1565C0)
 private val WORK_BADGE_COLOR = Color(0xFFE1551F)
@@ -190,25 +191,13 @@ fun ProgramRunnerScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            PhaseBadge(kind = step.kind)
-            Text(
-                if (phase == RunnerPhase.ConnectionLost) "--" else "${runner.remainingSeconds}s",
-                style = MaterialTheme.typography.displayMedium,
-            )
-        }
-
         gripHandText?.let {
             Text(
                 it,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = if (isRest) FontWeight.Normal else FontWeight.Bold,
                 color = if (isRest) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 12.dp),
+                modifier = Modifier.padding(top = 16.dp),
             )
         }
 
@@ -222,6 +211,21 @@ fun ProgramRunnerScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+
+        // The badge+timer sit right above the chart (not up with the progress bar) so
+        // the two things to glance at while actually pulling -- what to do, how much
+        // time is left, and the live trace -- are grouped together at the bottom.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PhaseBadge(kind = step.kind)
+            Text(
+                if (phase == RunnerPhase.ConnectionLost) "--" else "${runner.remainingSeconds}s",
+                style = MaterialTheme.typography.displayMedium,
             )
         }
 
@@ -276,9 +280,11 @@ private fun PhaseBadge(kind: StepKind) {
         StepKind.REST -> "Rest" to PREP_REST_BADGE_COLOR
         StepKind.WORK -> "Pull" to WORK_BADGE_COLOR
     }
+    val shape = RoundedCornerShape(16.dp)
     Box(
         modifier = Modifier
-            .background(color = color, shape = RoundedCornerShape(16.dp))
+            .background(color = color, shape = shape)
+            .border(width = 2.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f), shape = shape)
             .padding(horizontal = 24.dp, vertical = 14.dp),
     ) {
         Text(text, style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)

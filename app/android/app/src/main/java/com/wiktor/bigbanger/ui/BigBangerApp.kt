@@ -118,7 +118,16 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
             onBack = { screen = Screen.Home },
         )
 
-        Screen.Stats -> StatsScreen(viewModel = viewModel, onBack = { screen = Screen.Home })
+        Screen.Stats -> StatsScreen(
+            viewModel = viewModel,
+            onBack = { screen = Screen.Home },
+            onOpenGripHistory = { variant -> screen = Screen.GripMaxHistory(variant) },
+        )
+        is Screen.GripMaxHistory -> GripMaxHistoryScreen(
+            viewModel = viewModel,
+            variant = s.variant,
+            onBack = { screen = Screen.Stats },
+        )
         Screen.Settings -> SettingsScreen(
             viewModel = viewModel,
             updateStatus = updateStatus,

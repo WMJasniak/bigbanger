@@ -1,5 +1,6 @@
 package com.wiktor.bigbanger.ui
 
+import com.wiktor.bigbanger.training.GripVariant
 import com.wiktor.bigbanger.training.ProgramDefinition
 
 /** Simple sealed navigation state (house style, extended with payloads this app's flow needs). */
@@ -15,6 +16,9 @@ sealed interface Screen {
     /** [program]'s steps are already fully resolved against its configured grip sequence. */
     data class Running(val program: ProgramDefinition) : Screen
     data object Stats : Screen
+
+    /** One grip's full max-testing history (both hands), tapped from [Stats]. */
+    data class GripMaxHistory(val variant: GripVariant) : Screen
     data object Settings : Screen
     data object HoldsSettings : Screen
 }
