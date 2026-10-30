@@ -25,6 +25,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 
+/** The cooldown appended after a run's very last rep, when it would otherwise end mid-
+ * pull -- see [BigBangerViewModel.resolveProgramForRun]. */
+private const val TRAILING_REST_SECONDS = 1
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class BigBangerViewModel(application: Application) : AndroidViewModel(application) {
     private val realSource = ProgressorBleManager(application)
@@ -125,9 +129,10 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
         // pulling hard, instead of fading back to 0 first. Appending one more REST
         // whenever the resolved program would otherwise end on a WORK step covers
         // every program/leg-count combination in one place rather than special-casing
-        // each builder.
+        // each builder. Just long enough to let go and see the force actually drop,
+        // not the program's full configured rest -- there's no next rep to recover for.
         return if (resolved.steps.lastOrNull()?.kind == StepKind.WORK) {
-            resolved.copy(steps = resolved.steps + ProgramStep(kind = StepKind.REST, durationSeconds = timing.restSeconds))
+            resolved.copy(steps = resolved.steps + ProgramStep(kind = StepKind.REST, durationSeconds = TRAILING_REST_SECONDS))
         } else {
             resolved
         }

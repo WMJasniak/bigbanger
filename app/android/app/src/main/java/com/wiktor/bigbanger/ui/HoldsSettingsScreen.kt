@@ -12,12 +12,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +43,8 @@ fun HoldsSettingsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit) {
     val holdTypes by viewModel.trainingRepo.holdTypes.collectAsStateWithLifecycle()
     val variants by viewModel.trainingRepo.gripVariants.collectAsStateWithLifecycle()
     var newHoldName by remember { mutableStateOf("") }
+    var pendingDeleteHold by remember { mutableStateOf<HoldType?>(null) }
+    var pendingDeleteVariant by remember { mutableStateOf<GripVariant?>(null) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Holds & grips", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 16.dp))
@@ -78,12 +82,48 @@ fun HoldsSettingsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit) {
                     holdType = holdType,
                     variants = variants.filter { it.holdTypeId == holdType.id },
                     maxForHand = { variant, hand -> viewModel.trainingRepo.currentMaxKg(variant.id, hand) },
-                    onDeleteHold = { viewModel.trainingRepo.deleteHoldType(holdType.id) },
+                    onDeleteHold = { pendingDeleteHold = holdType },
                     onAddVariant = { name -> viewModel.trainingRepo.addGripVariant(holdType.id, name) },
-                    onDeleteVariant = { variant -> viewModel.trainingRepo.deleteGripVariant(variant.id) },
+                    onDeleteVariant = { variant -> pendingDeleteVariant = variant },
                 )
             }
         }
+    }
+
+    // Both delete every recorded max test underneath, permanently -- a slip of the
+    // thumb here otherwise destroys real history with no way back, unlike removing a
+    // grip from a program's own list (just unchecking or re-adding it later).
+    pendingDeleteHold?.let { holdType ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteHold = null },
+            title = { Text("Delete ${holdType.name}?") },
+            text = { Text("This deletes every grip under it and all of their recorded max tests. This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.trainingRepo.deleteHoldType(holdType.id)
+                        pendingDeleteHold = null
+                    },
+                ) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDeleteHold = null }) { Text("Cancel") } },
+        )
+    }
+    pendingDeleteVariant?.let { variant ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteVariant = null },
+            title = { Text("Delete ${variant.name}?") },
+            text = { Text("This deletes all of its recorded max tests. This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.trainingRepo.deleteGripVariant(variant.id)
+                        pendingDeleteVariant = null
+                    },
+                ) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDeleteVariant = null }) { Text("Cancel") } },
+        )
     }
 }
 
