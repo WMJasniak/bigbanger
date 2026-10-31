@@ -39,6 +39,7 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
     val trainingRepo = TrainingRepo(application).also {
         it.load()
         it.ensureNoHangsDefaultSeeded()
+        it.ensureNoHangsProtocolGripsExist()
     }
 
     private val themeSettings = ThemeSettings(application)

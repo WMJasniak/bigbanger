@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -32,6 +31,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -258,20 +258,23 @@ private fun formatDuration(totalSeconds: Int): String {
  * guessing a step size, the number itself is directly editable: tap it, type the exact
  * value, done. The +/- buttons stay for a quick +-1 nudge once you are close.
  *
- * Typing is tracked in its own local buffer and only committed (parsed, clamped, and
- * pushed up via [onValueChange]) on the keyboard's Done action or on losing focus --
- * not on every keystroke. Committing per-keystroke would round-trip the clamped value
- * straight back into this field while mid-edit (e.g. typing "90" one digit at a time
- * with [min] = 0: "9" commits fine, but clearing to type a fresh number passes through
- * "" or a leading "0" that would otherwise snap back and fight the next digit).
+ * Every valid keystroke commits immediately via [onValueChange], not just on the
+ * keyboard's Done action or losing focus -- navigating away (even via the system back
+ * gesture, which does not reliably fire a focus-loss callback on a composable that
+ * gets torn down rather than merely unfocused) must never silently drop whatever was
+ * last typed. The one thing a per-keystroke commit needs to guard against is the
+ * commit's own clamped value round-tripping back into this field and fighting an
+ * in-progress edit -- typing "90" one digit at a time, clearing first, passes through
+ * an empty string that must not be force-filled back to the old value while still
+ * focused. [isFocused] gates exactly that: the displayed text only resyncs from the
+ * external value while not actively being typed into.
  */
 @Composable
 private fun StepperRow(label: String, value: Int, min: Int, onValueChange: (Int) -> Unit) {
-    var text by remember(value) { mutableStateOf(value.toString()) }
-    fun commit() {
-        val parsed = text.toIntOrNull()?.coerceAtLeast(min) ?: value
-        text = parsed.toString()
-        if (parsed != value) onValueChange(parsed)
+    var text by remember { mutableStateOf(value.toString()) }
+    var isFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(value) {
+        if (!isFocused) text = value.toString()
     }
 
     Row(
@@ -286,14 +289,20 @@ private fun StepperRow(label: String, value: Int, min: Int, onValueChange: (Int)
             }
             OutlinedTextField(
                 value = text,
-                onValueChange = { new -> text = new.filter { it.isDigit() } },
+                onValueChange = { new ->
+                    val digits = new.filter { it.isDigit() }
+                    text = digits
+                    digits.toIntOrNull()?.let { onValueChange(it.coerceAtLeast(min)) }
+                },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.titleMedium.copy(textAlign = TextAlign.Center),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { commit() }),
                 modifier = Modifier
                     .width(64.dp)
-                    .onFocusChanged { if (!it.isFocused) commit() },
+                    .onFocusChanged { focusState ->
+                        isFocused = focusState.isFocused
+                        if (!focusState.isFocused && text.toIntOrNull() == null) text = value.toString()
+                    },
             )
             IconButton(onClick = { onValueChange(value + 1) }) {
                 Icon(Icons.Filled.Add, contentDescription = "Increase $label")

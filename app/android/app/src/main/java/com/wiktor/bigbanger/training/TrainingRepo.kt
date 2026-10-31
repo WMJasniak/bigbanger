@@ -216,8 +216,22 @@ class TrainingRepo(context: Context) {
         return holdType
     }
 
-    /** Deletes a hold type along with every grip variant under it and their max results. */
+    /** True for the "20mm Edge" hold -- the Abrahangs protocol's own hold, needed for
+     * No Hangs to mean anything. Protected from deletion for now (see [deleteHoldType]). */
+    fun isProtectedHoldType(id: String): Boolean = _holdTypes.value.firstOrNull { it.id == id }?.name == Programs.NO_HANGS_HOLD_TYPE
+
+    /** True for one of No Hangs' 6 protocol grip positions under the protected hold --
+     * protected from deletion for now (see [deleteGripVariant]), after one got deleted
+     * by accident and had to be restored by [ensureNoHangsProtocolGripsExist]. */
+    fun isProtectedGripVariant(id: String): Boolean {
+        val variant = _gripVariants.value.firstOrNull { it.id == id } ?: return false
+        return isProtectedHoldType(variant.holdTypeId) && Programs.NO_HANGS_DEFAULT_GRIPS.any { it.first == variant.name }
+    }
+
+    /** Deletes a hold type along with every grip variant under it and their max results.
+     * No-op for [isProtectedHoldType]. */
     fun deleteHoldType(id: String) {
+        if (isProtectedHoldType(id)) return
         val variantIds = _gripVariants.value.filter { it.holdTypeId == id }.map { it.id }.toSet()
         _holdTypes.update { list -> list.filterNot { it.id == id } }
         _gripVariants.update { list -> list.filterNot { it.holdTypeId == id } }
@@ -232,7 +246,9 @@ class TrainingRepo(context: Context) {
         return variant
     }
 
+    /** No-op for [isProtectedGripVariant]. */
     fun deleteGripVariant(id: String) {
+        if (isProtectedGripVariant(id)) return
         _gripVariants.update { list -> list.filterNot { it.id == id } }
         _maxResults.update { list -> list.filterNot { it.gripVariantId == id } }
         _programGripSequences.update { map -> map.mapValues { (_, ids) -> ids.filterNot { it == id } } }
@@ -285,6 +301,23 @@ class TrainingRepo(context: Context) {
         if (_programGripSequences.value.containsKey(ProgramId.NO_HANGS)) return
         val ids = Programs.NO_HANGS_DEFAULT_GRIPS.map { (gripName, _) -> ensureGripVariant(Programs.NO_HANGS_HOLD_TYPE, gripName).id }
         setGripSequence(ProgramId.NO_HANGS, ids)
+    }
+
+    /**
+     * Unlike [ensureNoHangsDefaultSeeded] (which only ever runs once, for a brand new
+     * install), this runs on every load: it re-creates any of the 6 protocol grips that
+     * are missing from the catalog -- deleted before they were protected -- and adds any
+     * back into No Hangs' own sequence, appended at the end rather than restored to
+     * their exact original position (a minor loose end a drag-reorder fixes easily).
+     * Existing ones, and their order, are left alone.
+     */
+    fun ensureNoHangsProtocolGripsExist() {
+        val protocolIds = Programs.NO_HANGS_DEFAULT_GRIPS.map { (gripName, _) -> ensureGripVariant(Programs.NO_HANGS_HOLD_TYPE, gripName).id }
+        val current = _programGripSequences.value[ProgramId.NO_HANGS] ?: emptyList()
+        val missing = protocolIds.filterNot { it in current }
+        if (missing.isNotEmpty()) {
+            setGripSequence(ProgramId.NO_HANGS, current + missing)
+        }
     }
 
     fun recordMaxTest(gripVariantId: String, hand: Hand, peakKg: Float): MaxTestResult {

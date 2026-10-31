@@ -125,36 +125,27 @@ fun ForceChart(
         val windowStart = now - windowSeconds * anchorFraction
         val visible = samples.filter { it.timestampSeconds >= windowStart }
 
-        // While a real target is in view, the range is normally fixed to "this leg's
-        // work level and zero" -- using legCenterKg (the leg's real level regardless of
-        // whether this exact segment is WORK or REST/PREP) rather than the displayed
-        // centerKg (which drops to zero for REST/PREP) -- so the axis does not jump
-        // every time the current step switches between work and rest. It is still
-        // scoped to just the current leg, not a neighboring one with a different max:
-        // legCenterKg is only ever borrowed from this same leg's own WORK step.
-        // Ordinary noise around the target is ignored (that is still what keeps the
-        // axis from jittering on every small overshoot), but a real peak well above it
-        // does expand the axis to actually show it -- and, since that only looks at
-        // [visible] (already scoped to the current scrolling window), it keeps the
-        // expanded range for as long as the peak sample is still on screen and only
-        // reverts once it has scrolled out, rather than the moment the live reading
-        // itself drops back down. Only without a real target (Max Testing, Raw Data)
-        // does the readout drive the axis unconditionally, since there is nothing else
-        // to scale against.
-        val currentSegment = sortedSegments.firstOrNull { it.startOffsetSeconds <= 0f && it.endOffsetSeconds > 0f }
-        val legCenter = currentSegment?.legCenterKg
-        val half = currentSegment?.halfWidthKg ?: 0f
-        val hasRealTarget = legCenter != null && half > 0.01f
+        // While a real target is in view, the range is driven only by the target levels
+        // -- using legCenterKg (a leg's real level regardless of whether this exact
+        // segment is WORK or REST/PREP) rather than the displayed centerKg (which drops
+        // to zero for REST/PREP) -- never the live readout itself, so noise or
+        // overshoot never makes the axis jitter. It looks at every segment currently
+        // visible (sortedSegments already is, per the caller's own pastSeconds/
+        // futureSeconds), not just the current step, specifically so that a program
+        // with legs at different targets (e.g. Max Hangs against two grips with
+        // different maxes) already shows the right range for the *next* leg's target
+        // the moment its strip first scrolls into view, rather than waiting until it
+        // actually becomes the current step. Only without a real target (Max Testing,
+        // Raw Data) does the readout drive the axis, since there is nothing else to
+        // scale against.
+        val visibleTargetTops = sortedSegments.mapNotNull { seg -> seg.legCenterKg?.let { it + seg.halfWidthKg } }
+        val visibleTargetBottoms = sortedSegments.mapNotNull { seg -> seg.legCenterKg?.let { -seg.halfWidthKg } }
+        val hasRealTarget = visibleTargetTops.isNotEmpty()
         val rawMin: Float
         val rawMax: Float
         if (hasRealTarget) {
-            // Work band top is legCenter+half; rest band bottom is 0-half -- the rest
-            // bottom always is the overall floor and the work top always is the overall
-            // ceiling, since legCenter is never negative.
-            rawMin = -half
-            val targetTop = legCenter!! + half
-            val visiblePeak = visible.maxOfOrNull { it.kilograms } ?: targetTop
-            rawMax = maxOf(targetTop, visiblePeak).coerceAtLeast(rawMin + 0.05f)
+            rawMin = visibleTargetBottoms.min()
+            rawMax = visibleTargetTops.max().coerceAtLeast(rawMin + 0.05f)
         } else {
             // A tiny epsilon floor, not a forced 1kg-tall axis -- small real readings
             // (an idle/untared raw trace, or a light Max Testing peak) were getting

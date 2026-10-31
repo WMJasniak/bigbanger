@@ -2,16 +2,19 @@ package com.wiktor.bigbanger.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
@@ -82,6 +85,8 @@ fun HoldsSettingsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit) {
                     holdType = holdType,
                     variants = variants.filter { it.holdTypeId == holdType.id },
                     maxForHand = { variant, hand -> viewModel.trainingRepo.currentMaxKg(variant.id, hand) },
+                    isProtectedHold = viewModel.trainingRepo.isProtectedHoldType(holdType.id),
+                    isProtectedVariant = { variant -> viewModel.trainingRepo.isProtectedGripVariant(variant.id) },
                     onDeleteHold = { pendingDeleteHold = holdType },
                     onAddVariant = { name -> viewModel.trainingRepo.addGripVariant(holdType.id, name) },
                     onDeleteVariant = { variant -> pendingDeleteVariant = variant },
@@ -132,6 +137,8 @@ private fun HoldTypeCard(
     holdType: HoldType,
     variants: List<GripVariant>,
     maxForHand: (GripVariant, Hand) -> Float?,
+    isProtectedHold: Boolean,
+    isProtectedVariant: (GripVariant) -> Boolean,
     onDeleteHold: () -> Unit,
     onAddVariant: (String) -> Unit,
     onDeleteVariant: (GripVariant) -> Unit,
@@ -146,7 +153,17 @@ private fun HoldTypeCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(holdType.name, style = MaterialTheme.typography.titleMedium)
-                IconButton(onClick = onDeleteHold) { Icon(Icons.Filled.Delete, contentDescription = "Delete ${holdType.name}") }
+                if (isProtectedHold) {
+                    Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.Lock,
+                            contentDescription = "${holdType.name} is protected from deletion",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    IconButton(onClick = onDeleteHold) { Icon(Icons.Filled.Delete, contentDescription = "Delete ${holdType.name}") }
+                }
             }
 
             variants.forEach { variant ->
@@ -163,8 +180,18 @@ private fun HoldTypeCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    IconButton(onClick = { onDeleteVariant(variant) }) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Delete ${variant.name}")
+                    if (isProtectedVariant(variant)) {
+                        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.Lock,
+                                contentDescription = "${variant.name} is protected from deletion",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = { onDeleteVariant(variant) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete ${variant.name}")
+                        }
                     }
                 }
             }
