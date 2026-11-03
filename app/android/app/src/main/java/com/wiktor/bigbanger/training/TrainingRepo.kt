@@ -53,18 +53,50 @@ class TrainingRepo(context: Context) {
 
     fun load() {
         if (!file.exists()) return
-        var needsSaveAfterLoad = false
-        try {
-            val root = JSONObject(file.readText())
+        val text = try {
+            file.readText()
+        } catch (_: Exception) {
+            return
+        }
+        parseAndApply(text)
+    }
+
+    /**
+     * Replaces every bit of in-memory state from [json] (a file previously written by
+     * [exportBackup]) and persists it as this installation's own data -- a deliberate
+     * full replace, matching what "restore a backup" means, not a merge. Returns false
+     * and leaves the current state completely untouched if [json] cannot be parsed, so
+     * a corrupt or unrelated file can never partially overwrite good data.
+     */
+    fun importBackup(json: String): Boolean {
+        if (!parseAndApply(json)) return false
+        save()
+        return true
+    }
+
+    /** The current state as one JSON string, suitable for writing to a file the user
+     * picks via [importBackup] later -- the exact same format [save] itself writes. */
+    fun exportBackup(): String = buildJson().toString()
+
+    /**
+     * Parses [json] fully into local values first and only assigns the StateFlows at the
+     * very end, in one shot -- so a parse failure partway through (e.g. a corrupt
+     * "maxResults" array after a perfectly good "holdTypes" one) can never leave some
+     * fields already overwritten with the new file's data while others still hold the
+     * old data. Either everything in [json] replaces everything in memory, or nothing does.
+     */
+    private fun parseAndApply(json: String): Boolean {
+        val parsed = try {
+            val root = JSONObject(json)
 
             val holds = root.optJSONArray("holdTypes") ?: JSONArray()
-            _holdTypes.value = (0 until holds.length()).map {
+            val holdTypes = (0 until holds.length()).map {
                 val h = holds.getJSONObject(it)
                 HoldType(h.getString("id"), h.getString("name"))
             }
 
             val variants = root.optJSONArray("gripVariants") ?: JSONArray()
-            _gripVariants.value = (0 until variants.length()).map {
+            val gripVariants = (0 until variants.length()).map {
                 val v = variants.getJSONObject(it)
                 GripVariant(v.getString("id"), v.getString("holdTypeId"), v.getString("name"))
             }
@@ -84,11 +116,11 @@ class TrainingRepo(context: Context) {
             // default grip/hand so a target band existed before any real Max Testing --
             // a real measurement is never going to land on exactly 1.000000kg, so this
             // is a safe way to drop the placeholders without touching real ones.
-            _maxResults.value = loadedResults.filterNot { it.peakKg == 1f }
-            if (_maxResults.value.size != loadedResults.size) needsSaveAfterLoad = true
+            val maxResults = loadedResults.filterNot { it.peakKg == 1f }
+            val needsSaveAfterLoad = maxResults.size != loadedResults.size
 
             val sessionArray = root.optJSONArray("sessions") ?: JSONArray()
-            _sessions.value = (0 until sessionArray.length()).map {
+            val sessions = (0 until sessionArray.length()).map {
                 val s = sessionArray.getJSONObject(it)
                 SessionLogEntry(
                     id = s.getString("id"),
@@ -98,14 +130,14 @@ class TrainingRepo(context: Context) {
             }
 
             val sequences = root.optJSONObject("programGripSequences")
-            _programGripSequences.value = sequences?.keys()?.asSequence()?.mapNotNull { key ->
+            val gripSequences = sequences?.keys()?.asSequence()?.mapNotNull { key ->
                 val programId = runCatching { ProgramId.valueOf(key) }.getOrNull() ?: return@mapNotNull null
                 val ids = sequences.getJSONArray(key)
                 programId to (0 until ids.length()).map { ids.getString(it) }
             }?.toMap() ?: emptyMap()
 
             val timing = root.optJSONObject("programTiming")
-            _programTiming.value = timing?.keys()?.asSequence()?.mapNotNull { key ->
+            val programTiming = timing?.keys()?.asSequence()?.mapNotNull { key ->
                 val programId = runCatching { ProgramId.valueOf(key) }.getOrNull() ?: return@mapNotNull null
                 val t = timing.getJSONObject(key)
                 programId to ProgramTiming(
@@ -116,94 +148,120 @@ class TrainingRepo(context: Context) {
             }?.toMap() ?: emptyMap()
 
             val disabled = root.optJSONObject("programDisabledGrips")
-            _programDisabledGrips.value = disabled?.keys()?.asSequence()?.mapNotNull { key ->
+            val disabledGrips = disabled?.keys()?.asSequence()?.mapNotNull { key ->
                 val programId = runCatching { ProgramId.valueOf(key) }.getOrNull() ?: return@mapNotNull null
                 val ids = disabled.getJSONArray(key)
                 programId to (0 until ids.length()).map { ids.getString(it) }.toSet()
             }?.toMap() ?: emptyMap()
+
+            ParsedState(holdTypes, gripVariants, maxResults, sessions, gripSequences, programTiming, disabledGrips, needsSaveAfterLoad)
         } catch (_: Exception) {
-            // Corrupt or unreadable state: start fresh rather than crash.
+            // Corrupt or unreadable state: leave whatever was already loaded untouched.
+            null
+        } ?: return false
+
+        _holdTypes.value = parsed.holdTypes
+        _gripVariants.value = parsed.gripVariants
+        _maxResults.value = parsed.maxResults
+        _sessions.value = parsed.sessions
+        _programGripSequences.value = parsed.programGripSequences
+        _programTiming.value = parsed.programTiming
+        _programDisabledGrips.value = parsed.programDisabledGrips
+        if (parsed.needsSaveAfterLoad) save()
+        return true
+    }
+
+    private data class ParsedState(
+        val holdTypes: List<HoldType>,
+        val gripVariants: List<GripVariant>,
+        val maxResults: List<MaxTestResult>,
+        val sessions: List<SessionLogEntry>,
+        val programGripSequences: Map<ProgramId, List<String>>,
+        val programTiming: Map<ProgramId, ProgramTiming>,
+        val programDisabledGrips: Map<ProgramId, Set<String>>,
+        val needsSaveAfterLoad: Boolean,
+    )
+
+    private fun buildJson(): JSONObject {
+        return JSONObject().apply {
+            put(
+                "holdTypes",
+                JSONArray().apply {
+                    _holdTypes.value.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) }
+                },
+            )
+            put(
+                "gripVariants",
+                JSONArray().apply {
+                    _gripVariants.value.forEach {
+                        put(JSONObject().put("id", it.id).put("holdTypeId", it.holdTypeId).put("name", it.name))
+                    }
+                },
+            )
+            put(
+                "maxResults",
+                JSONArray().apply {
+                    _maxResults.value.forEach {
+                        put(
+                            JSONObject()
+                                .put("id", it.id)
+                                .put("gripVariantId", it.gripVariantId)
+                                .put("hand", it.hand.name)
+                                .put("peakKg", it.peakKg.toDouble())
+                                .put("timestampMs", it.timestampMs),
+                        )
+                    }
+                },
+            )
+            put(
+                "sessions",
+                JSONArray().apply {
+                    _sessions.value.forEach {
+                        put(
+                            JSONObject()
+                                .put("id", it.id)
+                                .put("programId", it.programId.name)
+                                .put("timestampMs", it.timestampMs),
+                        )
+                    }
+                },
+            )
+            put(
+                "programGripSequences",
+                JSONObject().apply {
+                    _programGripSequences.value.forEach { (programId, variantIds) ->
+                        put(programId.name, JSONArray(variantIds))
+                    }
+                },
+            )
+            put(
+                "programTiming",
+                JSONObject().apply {
+                    _programTiming.value.forEach { (programId, timing) ->
+                        put(
+                            programId.name,
+                            JSONObject()
+                                .put("reps", timing.reps)
+                                .put("workSeconds", timing.workSeconds)
+                                .put("restSeconds", timing.restSeconds),
+                        )
+                    }
+                },
+            )
+            put(
+                "programDisabledGrips",
+                JSONObject().apply {
+                    _programDisabledGrips.value.forEach { (programId, ids) ->
+                        put(programId.name, JSONArray(ids.toList()))
+                    }
+                },
+            )
         }
-        if (needsSaveAfterLoad) save()
     }
 
     private fun save() {
         try {
-            val root = JSONObject().apply {
-                put(
-                    "holdTypes",
-                    JSONArray().apply {
-                        _holdTypes.value.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) }
-                    },
-                )
-                put(
-                    "gripVariants",
-                    JSONArray().apply {
-                        _gripVariants.value.forEach {
-                            put(JSONObject().put("id", it.id).put("holdTypeId", it.holdTypeId).put("name", it.name))
-                        }
-                    },
-                )
-                put(
-                    "maxResults",
-                    JSONArray().apply {
-                        _maxResults.value.forEach {
-                            put(
-                                JSONObject()
-                                    .put("id", it.id)
-                                    .put("gripVariantId", it.gripVariantId)
-                                    .put("hand", it.hand.name)
-                                    .put("peakKg", it.peakKg.toDouble())
-                                    .put("timestampMs", it.timestampMs),
-                            )
-                        }
-                    },
-                )
-                put(
-                    "sessions",
-                    JSONArray().apply {
-                        _sessions.value.forEach {
-                            put(
-                                JSONObject()
-                                    .put("id", it.id)
-                                    .put("programId", it.programId.name)
-                                    .put("timestampMs", it.timestampMs),
-                            )
-                        }
-                    },
-                )
-                put(
-                    "programGripSequences",
-                    JSONObject().apply {
-                        _programGripSequences.value.forEach { (programId, variantIds) ->
-                            put(programId.name, JSONArray(variantIds))
-                        }
-                    },
-                )
-                put(
-                    "programTiming",
-                    JSONObject().apply {
-                        _programTiming.value.forEach { (programId, timing) ->
-                            put(
-                                programId.name,
-                                JSONObject()
-                                    .put("reps", timing.reps)
-                                    .put("workSeconds", timing.workSeconds)
-                                    .put("restSeconds", timing.restSeconds),
-                            )
-                        }
-                    },
-                )
-                put(
-                    "programDisabledGrips",
-                    JSONObject().apply {
-                        _programDisabledGrips.value.forEach { (programId, ids) ->
-                            put(programId.name, JSONArray(ids.toList()))
-                        }
-                    },
-                )
-            }
-            file.writeText(root.toString())
+            file.writeText(buildJson().toString())
         } catch (_: Exception) {
             // Best-effort; nothing useful to do if the write fails.
         }
@@ -329,19 +387,6 @@ class TrainingRepo(context: Context) {
 
     fun deleteMaxResult(id: String) {
         _maxResults.update { list -> list.filterNot { it.id == id } }
-        save()
-    }
-
-    /** One-off cleanup: permanently deletes every recorded max test from before today,
-     * by calendar day (not "the last 24 hours"), keeping only today's. */
-    fun deleteMaxResultsBeforeToday() {
-        val startOfToday = java.util.Calendar.getInstance().apply {
-            set(java.util.Calendar.HOUR_OF_DAY, 0)
-            set(java.util.Calendar.MINUTE, 0)
-            set(java.util.Calendar.SECOND, 0)
-            set(java.util.Calendar.MILLISECOND, 0)
-        }.timeInMillis
-        _maxResults.update { list -> list.filter { it.timestampMs >= startOfToday } }
         save()
     }
 

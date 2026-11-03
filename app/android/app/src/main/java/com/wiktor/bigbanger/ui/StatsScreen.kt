@@ -8,17 +8,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,13 +30,9 @@ fun StatsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit, onOpenGripHis
     val holdTypes by viewModel.trainingRepo.holdTypes.collectAsStateWithLifecycle()
     val variants by viewModel.trainingRepo.gripVariants.collectAsStateWithLifecycle()
     val sessions by viewModel.trainingRepo.sessions.collectAsStateWithLifecycle()
-    var showDeleteOldConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Stats", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            TextButton(onClick = { showDeleteOldConfirm = true }) { Text("Keep only today's") }
-        }
+        Text("Stats", style = MaterialTheme.typography.titleLarge)
 
         Text(
             "Activity",
@@ -80,23 +70,6 @@ fun StatsScreen(viewModel: BigBangerViewModel, onBack: () -> Unit, onOpenGripHis
                 )
             }
         }
-    }
-
-    if (showDeleteOldConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteOldConfirm = false },
-            title = { Text("Keep only today's max tests?") },
-            text = { Text("This permanently deletes every recorded max test from before today, across every grip. This cannot be undone.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.trainingRepo.deleteMaxResultsBeforeToday()
-                        showDeleteOldConfirm = false
-                    },
-                ) { Text("Delete") }
-            },
-            dismissButton = { TextButton(onClick = { showDeleteOldConfirm = false }) { Text("Cancel") } },
-        )
     }
 }
 

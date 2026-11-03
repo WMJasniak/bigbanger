@@ -12,8 +12,8 @@ android {
         applicationId = "com.wiktor.bigbanger"
         minSdk = 26
         targetSdk = 35
-        versionCode = 35
-        versionName = "0.4.20"
+        versionCode = 36
+        versionName = "0.4.21"
     }
 
     buildTypes {
@@ -48,4 +48,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.mockito:mockito-core:5.14.2")
+    // The android.jar used for JVM unit tests stubs out org.json (throws on any real
+    // call); this puts the real implementation on the test classpath ahead of it so
+    // TrainingRepo's JSON persistence can actually be exercised instead of just mocked.
+    testImplementation("org.json:json:20231013")
 }
