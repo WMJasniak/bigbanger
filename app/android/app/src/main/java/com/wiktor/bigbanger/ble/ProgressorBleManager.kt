@@ -51,29 +51,49 @@ class ProgressorBleManager(context: Context) : ScaleSource {
     // notifications and the control-point writes (tare/start/stop) must therefore be
     // serialized through this queue rather than fired independently.
     private val pendingGattOperations = ArrayDeque<() -> Boolean>()
-    private var gattOperationInFlight = false
+    private var gattOperationInFlight: (() -> Boolean)? = null
+    private var gattOperationRetriesLeft = 0
 
     private fun enqueueGattOperation(operation: () -> Boolean) {
         pendingGattOperations.addLast(operation)
-        if (!gattOperationInFlight) runNextGattOperation()
+        if (gattOperationInFlight == null) runNextGattOperation()
     }
 
     private fun runNextGattOperation() {
         val next = pendingGattOperations.removeFirstOrNull()
         if (next == null) {
-            gattOperationInFlight = false
+            gattOperationInFlight = null
             return
         }
-        gattOperationInFlight = true
+        gattOperationInFlight = next
+        gattOperationRetriesLeft = 1
         // If the OS rejects the request synchronously (e.g. link momentarily busy), no
         // onCharacteristicWrite/onDescriptorWrite callback will ever arrive for it --
-        // advance immediately instead of stalling the queue forever.
-        if (!next()) runNextGattOperation()
+        // treat that the same as an async failure rather than stalling the queue forever.
+        if (!next()) onGattOperationFinished(success = false)
+    }
+
+    /**
+     * Called with the write's *actual* completion status, from onCharacteristicWrite/
+     * onDescriptorWrite -- previously ignored entirely, so a write the OS accepted but
+     * the remote device failed to apply (BLE writes to this firmware can fail
+     * transiently) looked identical to a successful one and was never retried. A
+     * one-shot action like tare, with no ongoing stream to notice it never took effect,
+     * is exactly where a silently dropped write would look like "doesn't work" instead
+     * of "occasionally doesn't work". One retry before moving on to the next queued op.
+     */
+    private fun onGattOperationFinished(success: Boolean) {
+        val operation = gattOperationInFlight
+        if (!success && operation != null && gattOperationRetriesLeft > 0) {
+            gattOperationRetriesLeft -= 1
+            if (operation()) return
+        }
+        runNextGattOperation()
     }
 
     private fun resetGattOperationQueue() {
         pendingGattOperations.clear()
-        gattOperationInFlight = false
+        gattOperationInFlight = null
     }
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -175,11 +195,11 @@ class ProgressorBleManager(context: Context) : ScaleSource {
         }
 
         override fun onDescriptorWrite(bluetoothGatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-            runNextGattOperation()
+            onGattOperationFinished(success = status == BluetoothGatt.GATT_SUCCESS)
         }
 
         override fun onCharacteristicWrite(bluetoothGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-            runNextGattOperation()
+            onGattOperationFinished(success = status == BluetoothGatt.GATT_SUCCESS)
         }
     }
 

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -365,11 +366,21 @@ private fun MissingMaxDialog(
     )
 }
 
-/** Shown right after a Max Testing run (finished or cancelled early) that recorded at
+/**
+ * Shown right after a Max Testing run (finished or cancelled early) that recorded at
  * least one attempt -- scoped to just this run's own readings via [resultIds], not
  * every max test ever recorded for these grips, so there is one clear place to catch a
  * slipped grip or false start before it skews the rolling average in Stats. Deleting
- * here uses the same TrainingRepo call Stats itself uses, so either place stays correct. */
+ * here uses the same TrainingRepo call Stats itself uses, so either place stays correct.
+ *
+ * Grouped by grip+hand (in the order each first appeared this session) and sorted best
+ * peak first within each group, with every reading but the best greyed out -- the best
+ * is what's actually going to count, so it should be the obvious one, and the rest are
+ * only there to delete if they are clearly wrong. This is re-derived fresh from
+ * whichever readings are still left every time the screen recomposes, not decided once
+ * up front, so deleting the current best promotes whichever greyed-out one is now
+ * highest automatically.
+ */
 @Composable
 private fun MaxTestingSummaryScreen(viewModel: BigBangerViewModel, resultIds: List<String>, onDone: () -> Unit) {
     BackHandler(onBack = onDone)
@@ -378,25 +389,37 @@ private fun MaxTestingSummaryScreen(viewModel: BigBangerViewModel, resultIds: Li
     val variants by viewModel.trainingRepo.gripVariants.collectAsStateWithLifecycle()
     val holdTypes by viewModel.trainingRepo.holdTypes.collectAsStateWithLifecycle()
     val results = resultIds.mapNotNull { id -> allResults.firstOrNull { it.id == id } }
+    val groupOrder = results.map { it.gripVariantId to it.hand }.distinct()
+    val rows = groupOrder.flatMap { key ->
+        results.filter { it.gripVariantId to it.hand == key }
+            .sortedByDescending { it.peakKg }
+            .mapIndexed { index, result -> result to (index == 0) }
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Session results", style = MaterialTheme.typography.titleLarge)
         Text(
-            "Delete any reading that shouldn't count (slipped grip, false start, ...).",
+            "The best reading per grip counts and stays highlighted; the rest are greyed out -- delete any that shouldn't count.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
         )
 
-        if (results.isEmpty()) {
+        if (rows.isEmpty()) {
             Text("Nothing left -- everything was deleted.", style = MaterialTheme.typography.bodyMedium)
         }
 
         LazyColumn(modifier = Modifier.weight(1f)) {
-            items(results, key = { it.id }) { result ->
+            items(rows, key = { it.first.id }) { (result, isBest) ->
                 val variant = variants.firstOrNull { it.id == result.gripVariantId }
                 val holdName = variant?.let { v -> holdTypes.firstOrNull { it.id == v.holdTypeId }?.name }
-                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                val contentColor = if (isBest) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isBest) CardDefaults.cardColors().containerColor else MaterialTheme.colorScheme.surface,
+                    ),
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -406,11 +429,29 @@ private fun MaxTestingSummaryScreen(viewModel: BigBangerViewModel, resultIds: Li
                             Text(
                                 "${holdName ?: "?"} · ${variant?.name ?: "?"} — ${result.hand.displayLabel}",
                                 style = MaterialTheme.typography.bodyMedium,
+                                color = contentColor,
                             )
-                            Text("${"%.1f".format(result.peakKg)} kg", style = MaterialTheme.typography.titleMedium)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "${"%.1f".format(result.peakKg)} kg",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = contentColor,
+                                )
+                                if (isBest) {
+                                    Text(
+                                        "  Best",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
                         }
                         IconButton(onClick = { viewModel.trainingRepo.deleteMaxResult(result.id) }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Delete this reading")
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "Delete this reading",
+                                tint = contentColor,
+                            )
                         }
                     }
                 }

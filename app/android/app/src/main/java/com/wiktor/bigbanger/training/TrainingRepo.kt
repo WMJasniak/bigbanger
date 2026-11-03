@@ -332,6 +332,19 @@ class TrainingRepo(context: Context) {
         save()
     }
 
+    /** One-off cleanup: permanently deletes every recorded max test from before today,
+     * by calendar day (not "the last 24 hours"), keeping only today's. */
+    fun deleteMaxResultsBeforeToday() {
+        val startOfToday = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        _maxResults.update { list -> list.filter { it.timestampMs >= startOfToday } }
+        save()
+    }
+
     fun logSession(programId: ProgramId) {
         _sessions.update { it + SessionLogEntry(UUID.randomUUID().toString(), programId, System.currentTimeMillis()) }
         save()
