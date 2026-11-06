@@ -114,6 +114,8 @@ class ProgressorBleManager(context: Context) : ScaleSource {
     private val _weightHistory = MutableStateFlow<List<WeightSample>>(emptyList())
     override val weightHistory = _weightHistory.asStateFlow()
 
+    private val tareOffset = TareOffset()
+
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
@@ -205,7 +207,7 @@ class ProgressorBleManager(context: Context) : ScaleSource {
 
     private fun handleNotification(characteristic: BluetoothGattCharacteristic, value: ByteArray) {
         if (characteristic.uuid != ProgressorProtocol.DATA_CHARACTERISTIC_UUID) return
-        val sample = ProgressorProtocol.decodeWeight(value) ?: return
+        val sample = ProgressorProtocol.decodeWeight(value)?.let { it.copy(kilograms = tareOffset.apply(it.kilograms)) } ?: return
         _latestWeightKg.value = sample.kilograms
         _weightHistory.update { history ->
             (history + sample).let { if (it.size > MAX_HISTORY_SAMPLES) it.takeLast(MAX_HISTORY_SAMPLES) else it }
@@ -255,11 +257,28 @@ class ProgressorBleManager(context: Context) : ScaleSource {
     }
 
     override fun tare() {
-        writeControlOpcode(ProgressorProtocol.ControlOpcode.TARE)
+        if (_isMeasuring.value) {
+            // Tare mid-stream (Free Measure's only state -- it auto-starts on connect
+            // and has no stop button) can't rely on the firmware's own tare: it's
+            // silently dropped while a measurement is already running on at least the
+            // Rust firmware, with no way for the app to tell a dropped tare apart from
+            // a real one, so this doesn't send the opcode at all here. Zeroing on this
+            // side instead works regardless of firmware version and needs no reflash.
+            tareOffset.captureFromLastRaw()
+        } else {
+            // Not streaming yet (e.g. a program's Ready gate, before Start) -- the
+            // firmware isn't in the broken state above, so just ask it to tare.
+            writeControlOpcode(ProgressorProtocol.ControlOpcode.TARE)
+        }
     }
 
     override fun startMeasurement() {
         if (writeControlOpcode(ProgressorProtocol.ControlOpcode.START_MEASUREMENT)) {
+            // A fresh session: any software offset from a previous Free Measure tare
+            // doesn't apply here, and if this follows a Ready-gate tare, the firmware
+            // already zeroed things itself -- stacking a software offset on top of
+            // that would double-tare.
+            tareOffset.reset()
             _weightHistory.value = emptyList()
             _isMeasuring.value = true
         }
