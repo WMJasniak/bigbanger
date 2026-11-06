@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -30,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -59,28 +62,82 @@ import com.wiktor.bigbanger.training.Programs
 import com.wiktor.bigbanger.training.TrainingMode
 import kotlin.math.roundToInt
 
+/** This screen's own editable fields, bundled together so "has anything changed since
+ * the last save" is one equality check instead of three. */
+private data class ProgramConfigDraft(
+    val selectedIds: List<String>,
+    val disabledIds: Set<String>,
+    val timing: ProgramTiming,
+)
+
 /**
  * A program's own settings: which grips it always runs against and in what order, its
  * sets/reps, and its work/rest timing -- set once here instead of picking a grip (and
  * living with built-in numbers) every single time. A program with nothing configured
  * here can't be run (see BigBangerViewModel.resolveProgramForRun); the Home screen
  * prompts the user back here if they try.
+ *
+ * Edits are local until Save is pressed (see [ProgramConfigDraft]) -- leaving with
+ * unsaved changes, via the system back gesture, prompts to save or discard instead of
+ * silently losing or silently committing them.
  */
 @Composable
 fun ProgramGripConfigScreen(viewModel: BigBangerViewModel, program: ProgramDefinition, onBack: () -> Unit) {
-    BackHandler(onBack = onBack)
-
-    val holdTypes by viewModel.trainingRepo.holdTypes.collectAsStateWithLifecycle()
-    val allVariants by viewModel.trainingRepo.gripVariants.collectAsStateWithLifecycle()
     val sequences by viewModel.trainingRepo.programGripSequences.collectAsStateWithLifecycle()
     val timings by viewModel.trainingRepo.programTiming.collectAsStateWithLifecycle()
     val disabledGrips by viewModel.trainingRepo.programDisabledGrips.collectAsStateWithLifecycle()
-    val selectedIds = sequences[program.id] ?: emptyList()
-    val timing = timings[program.id] ?: Programs.defaultTimingFor(program.id)
-    val disabledIds = disabledGrips[program.id] ?: emptySet()
 
-    fun setSelected(ids: List<String>) = viewModel.trainingRepo.setGripSequence(program.id, ids)
-    fun setTiming(newTiming: ProgramTiming) = viewModel.trainingRepo.setTiming(program.id, newTiming)
+    // Seeded once per program from whatever's already saved, then edited only locally --
+    // nothing below writes through to TrainingRepo until Save is pressed. `saved` tracks
+    // what's actually on disk right now, so comparing it against `draft` is exactly "are
+    // there unsaved changes", independent of how many edits led there.
+    val initial = remember(program.id) {
+        ProgramConfigDraft(
+            selectedIds = sequences[program.id] ?: emptyList(),
+            disabledIds = disabledGrips[program.id] ?: emptySet(),
+            timing = timings[program.id] ?: Programs.defaultTimingFor(program.id),
+        )
+    }
+    var saved by remember(program.id) { mutableStateOf(initial) }
+    var draft by remember(program.id) { mutableStateOf(initial) }
+    val isDirty = draft != saved
+    var showUnsavedDialog by remember { mutableStateOf(false) }
+
+    val holdTypes by viewModel.trainingRepo.holdTypes.collectAsStateWithLifecycle()
+    val allVariants by viewModel.trainingRepo.gripVariants.collectAsStateWithLifecycle()
+    val selectedIds = draft.selectedIds
+    val timing = draft.timing
+    val disabledIds = draft.disabledIds
+
+    fun setSelected(ids: List<String>) {
+        draft = draft.copy(selectedIds = ids)
+    }
+    fun setTiming(newTiming: ProgramTiming) {
+        draft = draft.copy(timing = newTiming)
+    }
+    fun setGripEnabled(id: String, enabled: Boolean) {
+        draft = draft.copy(disabledIds = if (enabled) draft.disabledIds - id else draft.disabledIds + id)
+    }
+    fun saveDraft() {
+        viewModel.trainingRepo.commitProgramConfig(program.id, draft.selectedIds, draft.disabledIds, draft.timing)
+        saved = draft
+    }
+
+    BackHandler { if (isDirty) showUnsavedDialog = true else onBack() }
+
+    if (showUnsavedDialog) {
+        AlertDialog(
+            onDismissRequest = { showUnsavedDialog = false },
+            title = { Text("Save changes?") },
+            text = { Text("You've changed this program's settings but haven't saved yet.") },
+            confirmButton = {
+                TextButton(onClick = { saveDraft(); showUnsavedDialog = false; onBack() }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUnsavedDialog = false; onBack() }) { Text("Discard") }
+            },
+        )
+    }
 
     // Full mode (no volume cut) for this preview -- the Ready gate's own Fast/Express
     // choice is a per-run thing, not part of what's being configured here.
@@ -89,7 +146,14 @@ fun ProgramGripConfigScreen(viewModel: BigBangerViewModel, program: ProgramDefin
         ?: "Enable a grip below to see the full cycle time"
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("${program.title} settings", style = MaterialTheme.typography.titleLarge)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("${program.title} settings", style = MaterialTheme.typography.titleLarge)
+            Button(onClick = ::saveDraft, enabled = isDirty) { Text("Save") }
+        }
         Text(
             "Full cycle: $cycleTimeLabel",
             style = MaterialTheme.typography.titleMedium,
@@ -130,7 +194,7 @@ fun ProgramGripConfigScreen(viewModel: BigBangerViewModel, program: ProgramDefin
                             if (variant != null) "$holdName · ${variant.name}" else "(deleted grip)"
                         },
                         enabledFor = { id -> id !in disabledIds },
-                        onToggleEnabled = { id, enabled -> viewModel.trainingRepo.setGripEnabled(program.id, id, enabled) },
+                        onToggleEnabled = { id, enabled -> setGripEnabled(id, enabled) },
                         onRemove = { id -> setSelected(selectedIds.filterNot { it == id }) },
                         onReorder = { newOrder -> setSelected(newOrder) },
                     )

@@ -346,6 +346,17 @@ class TrainingRepo(context: Context) {
         save()
     }
 
+    /** Commits a program's whole settings screen (grip sequence, disabled set, and
+     * timing) in one write instead of three separate ones -- its Save button is the
+     * only caller, so an edit session that touched all of them lands as a single save()
+     * rather than three, and can't be interrupted partway between them. */
+    fun commitProgramConfig(programId: ProgramId, variantIds: List<String>, disabledIds: Set<String>, timing: ProgramTiming) {
+        _programGripSequences.update { it + (programId to variantIds) }
+        _programDisabledGrips.update { it + (programId to disabledIds) }
+        _programTiming.update { it + (programId to timing) }
+        save()
+    }
+
     /**
      * No Hangs ships with a default grip order (see [Programs.NO_HANGS_DEFAULT_GRIPS]) so
      * it works before the user ever opens its settings, instead of starting out empty like

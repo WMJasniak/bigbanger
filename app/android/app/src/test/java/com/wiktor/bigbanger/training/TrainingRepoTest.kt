@@ -98,6 +98,28 @@ class TrainingRepoTest {
     }
 
     @Test
+    fun commitProgramConfig_persistsAllThreeFieldsTogetherAndSurvivesReload() {
+        val dir = Files.createTempDirectory("trainingrepo_test_commit").toFile()
+        val context = mock(Context::class.java)
+        `when`(context.filesDir).thenReturn(dir)
+        val repo = TrainingRepo(context)
+        val hold = repo.addHoldType("20mm Edge")
+        val variant = repo.addGripVariant(hold.id, "Front-2 Open")
+
+        val timing = ProgramTiming(reps = 5, workSeconds = 8, restSeconds = 90)
+        repo.commitProgramConfig(ProgramId.WARM_UP, listOf(variant.id), setOf(variant.id), timing)
+
+        // A Save button's whole point is that this survives past the in-memory
+        // StateFlow -- reload from the same file a fresh TrainingRepo would read on
+        // the next app start, the same way the backup round-trip test above does.
+        val reloaded = TrainingRepo(context)
+        reloaded.load()
+        assertEquals(listOf(variant.id), reloaded.gripSequenceFor(ProgramId.WARM_UP).map { it.id })
+        assertEquals(setOf(variant.id), reloaded.disabledGripsFor(ProgramId.WARM_UP))
+        assertEquals(timing, reloaded.timingFor(ProgramId.WARM_UP))
+    }
+
+    @Test
     fun load_corruptFileOnDisk_doesNotCrashAndKeepsRepoUsable() {
         val dir = Files.createTempDirectory("trainingrepo_test_corrupt").toFile()
         File(dir, "training.json").writeText("{ not valid json at all")
