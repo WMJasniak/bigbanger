@@ -18,8 +18,21 @@ pub async fn start_measurement_task(load_sensor: &'static Mutex<CriticalSectionR
                     sensor.start_now();
                 }
                 loop {
-                    if let Some(MeasurementCommand::Stop) = MEASUREMENT_CMD.try_take() {
-                        break;
+                    // MEASUREMENT_CMD is a Signal, not a queue -- it only ever holds the
+                    // latest command. A Tare sent while already streaming used to be
+                    // picked up here, found not to be Stop, and silently dropped, so
+                    // the tare button did nothing at all while a measurement was live
+                    // (the only state Free Measure's screen ever leaves it in, since it
+                    // auto-starts on connect and has no stop button). Act on Tare here
+                    // too instead of discarding it.
+                    match MEASUREMENT_CMD.try_take() {
+                        Some(MeasurementCommand::Stop) => break,
+                        Some(MeasurementCommand::Tare) => {
+                            debug_info("Taring the load sensor");
+                            let mut sensor = load_sensor.lock().await;
+                            sensor.tare(16);
+                        }
+                        _ => {}
                     }
                     let mut sensor = load_sensor.lock().await;
                     let packet = sensor.get_weight_packet().await;

@@ -52,7 +52,7 @@ object Programs {
         ProgramId.MAX_HANGS -> ProgramTiming(reps = 6, workSeconds = 10, restSeconds = 120)
         ProgramId.MAX_TESTING -> ProgramTiming(reps = 8, workSeconds = 7, restSeconds = 120)
         ProgramId.WARM_UP -> ProgramTiming(reps = 1, workSeconds = 8, restSeconds = 60)
-        ProgramId.NO_HANGS -> ProgramTiming(reps = 0, workSeconds = 10, restSeconds = 20)
+        ProgramId.NO_HANGS -> ProgramTiming(reps = 0, workSeconds = 10, restSeconds = 50)
     }
 
     /** Display-only stubs for the Home list and settings screens -- the steps actually
