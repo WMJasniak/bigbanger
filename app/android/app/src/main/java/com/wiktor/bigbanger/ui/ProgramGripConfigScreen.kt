@@ -140,8 +140,13 @@ fun ProgramGripConfigScreen(viewModel: BigBangerViewModel, program: ProgramDefin
     }
 
     // Full mode (no volume cut) for this preview -- the Ready gate's own Fast/Express
-    // choice is a per-run thing, not part of what's being configured here.
-    val resolved = remember(selectedIds, timing, disabledIds) { viewModel.resolveProgramForRun(program, TrainingMode.FULL) }
+    // choice is a per-run thing, not part of what's being configured here. Resolves
+    // against the local draft (resolveProgram), not resolveProgramForRun, which reads
+    // from TrainingRepo -- that would only reflect the last Save, leaving this preview
+    // frozen while editing exactly what it's supposed to be previewing.
+    val resolved = remember(selectedIds, timing, disabledIds) {
+        viewModel.resolveProgram(program, TrainingMode.FULL, selectedIds, disabledIds, timing)
+    }
     val cycleTimeLabel = resolved?.let { formatDuration(it.steps.sumOf { s -> s.durationSeconds }) }
         ?: "Enable a grip below to see the full cycle time"
 

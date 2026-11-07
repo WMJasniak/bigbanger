@@ -13,6 +13,7 @@ import com.wiktor.bigbanger.training.Hand
 import com.wiktor.bigbanger.training.ProgramDefinition
 import com.wiktor.bigbanger.training.ProgramId
 import com.wiktor.bigbanger.training.ProgramStep
+import com.wiktor.bigbanger.training.ProgramTiming
 import com.wiktor.bigbanger.training.Programs
 import com.wiktor.bigbanger.training.StepKind
 import com.wiktor.bigbanger.training.TrainingMode
@@ -108,12 +109,31 @@ class BigBangerViewModel(application: Application) : AndroidViewModel(applicatio
      * step with no countdown to get into position first.
      */
     fun resolveProgramForRun(program: ProgramDefinition, mode: TrainingMode): ProgramDefinition? {
-        val disabled = trainingRepo.disabledGripsFor(program.id)
-        val legs = trainingRepo.gripSequenceFor(program.id)
-            .filter { it.id !in disabled }
+        val variantIds = trainingRepo.gripSequenceFor(program.id).map { it.id }
+        val disabledIds = trainingRepo.disabledGripsFor(program.id)
+        val timing = trainingRepo.timingFor(program.id)
+        return resolveProgram(program, mode, variantIds, disabledIds, timing)
+    }
+
+    /**
+     * [resolveProgramForRun] with an explicit grip sequence/disabled set/timing instead
+     * of reading them from TrainingRepo -- lets a settings screen preview unsaved draft
+     * edits (the cycle-time estimate in ProgramGripConfigScreen) without writing them
+     * through first. [resolveProgramForRun] is just this called with whatever's
+     * currently *saved*.
+     */
+    fun resolveProgram(
+        program: ProgramDefinition,
+        mode: TrainingMode,
+        variantIds: List<String>,
+        disabledIds: Set<String>,
+        timing: ProgramTiming,
+    ): ProgramDefinition? {
+        val legs = variantIds
+            .filter { it !in disabledIds }
+            .mapNotNull { id -> trainingRepo.gripVariants.value.firstOrNull { it.id == id } }
             .mapNotNull { variant -> trainingRepo.holdTypes.value.firstOrNull { it.id == variant.holdTypeId }?.let { it to variant } }
         if (legs.isEmpty()) return null
-        val timing = trainingRepo.timingFor(program.id)
         val resolved = when (program.id) {
             ProgramId.NO_HANGS -> Programs.buildNoHangs(legs, timing, mode)
             ProgramId.MAX_HANGS ->

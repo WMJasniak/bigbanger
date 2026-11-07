@@ -179,7 +179,10 @@ fun ProgramRunnerScreen(
 
     LaunchedEffect(runner.phase) {
         if (runner.phase is RunnerPhase.Finished) {
-            viewModel.trainingRepo.logSession(runningProgram.id)
+            // Same reasoning as onAttemptCompleted's own guard below -- testing the
+            // app's flow against the demo signal must never show up in Stats, and the
+            // Activity graph there reads straight off every logged session.
+            if (!viewModel.isSimulatedSource) viewModel.trainingRepo.logSession(runningProgram.id)
             showSummary = true
         }
     }
