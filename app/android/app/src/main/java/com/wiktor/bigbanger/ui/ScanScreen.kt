@@ -25,7 +25,15 @@ import com.wiktor.bigbanger.BigBangerViewModel
 import com.wiktor.bigbanger.ble.BleDevice
 
 @Composable
-fun ScanScreen(viewModel: BigBangerViewModel, onBack: (() -> Unit)? = null) {
+fun ScanScreen(
+    viewModel: BigBangerViewModel,
+    /** Real-scale scanning needs the radio on; the simulated scale below never does,
+     * so the app itself never gates behind this (see BigBangerApp) -- only the real-
+     * scan controls on this one screen get replaced by an "enable it" prompt. */
+    bluetoothEnabled: Boolean = true,
+    onEnableBluetooth: () -> Unit = {},
+    onBack: (() -> Unit)? = null,
+) {
     // Without this, the system back gesture/button had nothing to intercept here and
     // fell through to the Activity's default behavior -- closing the whole app instead
     // of returning to Home, since this is a single-Activity app with no back stack of
@@ -44,31 +52,42 @@ fun ScanScreen(viewModel: BigBangerViewModel, onBack: (() -> Unit)? = null) {
         ) {
             onBack?.let { back -> TextButton(onClick = back) { Text("Cancel") } }
             Text("Nearby scales", style = MaterialTheme.typography.titleLarge)
-            Button(onClick = { if (isScanning) viewModel.stopScan() else viewModel.startScan() }) {
-                Text(if (isScanning) "Stop" else "Scan")
+            if (bluetoothEnabled) {
+                Button(onClick = { if (isScanning) viewModel.stopScan() else viewModel.startScan() }) {
+                    Text(if (isScanning) "Stop" else "Scan")
+                }
             }
         }
 
-        if (isScanning) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                CircularProgressIndicator()
-            }
-        }
-
-        if (sorted.isEmpty() && !isScanning) {
+        if (!bluetoothEnabled) {
             Text(
-                "No devices found yet. Tap Scan and make sure your BigBanger is turned on.",
-                modifier = Modifier.padding(top = 24.dp),
+                "Bluetooth is off -- turn it on to find a real scale.",
                 style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 24.dp, bottom = 12.dp),
             )
-        }
+            Button(onClick = onEnableBluetooth) { Text("Enable Bluetooth") }
+        } else {
+            if (isScanning) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
 
-        LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
-            items(sorted, key = { it.address }) { device ->
-                DeviceRow(device = device, onClick = { viewModel.connect(device) })
+            if (sorted.isEmpty() && !isScanning) {
+                Text(
+                    "No devices found yet. Tap Scan and make sure your BigBanger is turned on.",
+                    modifier = Modifier.padding(top = 24.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+
+            LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+                items(sorted, key = { it.address }) { device ->
+                    DeviceRow(device = device, onClick = { viewModel.connect(device) })
+                }
             }
         }
 

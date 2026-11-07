@@ -83,14 +83,10 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
         )
         onDispose { context.unregisterReceiver(receiver) }
     }
-    if (!adapterEnabled) {
-        PermissionScreen(
-            message = "Bluetooth is turned off.",
-            buttonLabel = "Enable Bluetooth",
-            onRequestPermissions = { enableBtLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) },
-        )
-        return
-    }
+    // Bluetooth being off no longer gates the whole app -- Home, Settings, Stats, and
+    // the simulated scale all work without it. Only ScanScreen, the one place that
+    // actually needs the real radio, shows an "enable it" prompt in place of its
+    // real-scan controls, via the two params passed to it below.
 
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
     var unconfiguredProgram by remember { mutableStateOf<ProgramDefinition?>(null) }
@@ -130,7 +126,12 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
                     DeviceScreen(viewModel = viewModel, device = cs.device, onBack = { screen = Screen.Home })
                 is ConnectionState.Reconnecting ->
                     DeviceScreen(viewModel = viewModel, device = cs.device, onBack = { screen = Screen.Home })
-                ConnectionState.Disconnected -> ScanScreen(viewModel = viewModel, onBack = { screen = Screen.Home })
+                ConnectionState.Disconnected -> ScanScreen(
+                    viewModel = viewModel,
+                    bluetoothEnabled = adapterEnabled,
+                    onEnableBluetooth = { enableBtLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) },
+                    onBack = { screen = Screen.Home },
+                )
             }
         }
 
