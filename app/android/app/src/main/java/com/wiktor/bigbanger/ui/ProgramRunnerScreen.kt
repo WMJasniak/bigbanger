@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wiktor.bigbanger.BigBangerViewModel
 import com.wiktor.bigbanger.ble.ConnectionState
+import com.wiktor.bigbanger.ble.WeightSample
 import com.wiktor.bigbanger.training.GripVariant
 import com.wiktor.bigbanger.training.ProgramDefinition
 import com.wiktor.bigbanger.training.ProgramRunner
@@ -78,12 +79,30 @@ fun ProgramRunnerScreen(
     val runningProgram = resolvedProgram
 
     if (showSummary) {
-        MaxTestingSummaryScreen(viewModel = viewModel, resultIds = recordedResultIds, onDone = onFinished)
+        // Max Testing gets its own summary (recorded attempts to keep or delete);
+        // every other program gets a plain recap instead of being dropped straight
+        // back at the home screen the instant the last rep ends.
+        if (recordedResultIds.isNotEmpty()) {
+            MaxTestingSummaryScreen(viewModel = viewModel, resultIds = recordedResultIds, onDone = onFinished)
+        } else {
+            runningProgram?.let { SessionSummaryScreen(program = it, onDone = onFinished) }
+        }
         return
     }
 
     if (runningProgram == null) {
         BackHandler(onBack = onFinished)
+
+        // Starts streaming as soon as the gate connects, instead of waiting for Start:
+        // by the time Start is actually pressed (after taring and picking a mode),
+        // real data has already been flowing for as long as that took, so the chart
+        // has something to show from its very first frame rather than a gap while the
+        // device spins up. Same pattern DeviceScreen uses for Free Measure.
+        val readyConnectionState by viewModel.connectionState.collectAsStateWithLifecycle()
+        LaunchedEffect(readyConnectionState) {
+            if (readyConnectionState is ConnectionState.Connected) viewModel.startMeasurement()
+        }
+
         ReadyGate(
             program = program,
             mode = mode,
@@ -128,6 +147,7 @@ fun ProgramRunnerScreen(
                 if (variant != null && hand != null) viewModel.trainingRepo.currentMaxKg(variant.id, hand) else null
             },
             scope = scope,
+            isMeasuring = { viewModel.isMeasuring.value },
             onSetMeasuring = { active -> if (active) viewModel.startMeasurement() else viewModel.stopMeasurement() },
             currentHistory = { viewModel.weightHistory.value },
             onAttemptCompleted = { step, peak ->
@@ -160,7 +180,7 @@ fun ProgramRunnerScreen(
     LaunchedEffect(runner.phase) {
         if (runner.phase is RunnerPhase.Finished) {
             viewModel.trainingRepo.logSession(runningProgram.id)
-            if (recordedResultIds.isNotEmpty()) showSummary = true else onFinished()
+            showSummary = true
         }
     }
 
@@ -169,9 +189,25 @@ fun ProgramRunnerScreen(
     // recorded still gets the same chance to review/delete them.
     BackHandler { runner.cancel() }
 
-    val history by viewModel.weightHistory.collectAsStateWithLifecycle()
+    val liveHistory by viewModel.weightHistory.collectAsStateWithLifecycle()
     val step = runner.currentStep
     val phase = runner.phase
+
+    // Pausing only freezes what's shown -- measurement itself keeps running in the
+    // background (same as before), so a tare or a connection check mid-pause still
+    // works and nothing about the real session is interrupted. Holding both the
+    // sample list and the "now" fed into the target strip's math at their values from
+    // the moment Pause was pressed is enough to stop the chart rolling entirely:
+    // ForceChart's own clock settles to a small, constant lead over a frozen input
+    // rather than drifting away (it's a damped per-frame nudge toward the latest
+    // sample, not an unbounded one), so nothing else needs to change inside it.
+    // Un-pausing clears the snapshot and the same smoothing catches the chart up to
+    // the live reading within well under a second.
+    var pausedHistory by remember { mutableStateOf<List<WeightSample>?>(null) }
+    LaunchedEffect(phase) {
+        pausedHistory = if (phase == RunnerPhase.Paused) liveHistory else null
+    }
+    val history = pausedHistory ?: liveHistory
 
     // During REST, preview the *next* step's grip/hand (muted) instead of this step's
     // (there isn't one) -- and keep showing the *previous* step's rep counter instead of
@@ -460,4 +496,64 @@ private fun MaxTestingSummaryScreen(viewModel: BigBangerViewModel, resultIds: Li
 
         Button(onClick = onDone, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Text("Done") }
     }
+}
+
+/**
+ * Shown right after any non-Max-Testing program finishes or is cancelled, instead of
+ * dropping straight back to the home screen the instant the last rep ends -- a plain
+ * recap, since (unlike Max Testing) there are no per-attempt readings here to review.
+ *
+ * Reps/time reflect [program]'s full resolved step list, not however far an early
+ * Cancel actually got -- simplest to reason about, and right in the normal case
+ * (finishing the run), which is by far the common one.
+ */
+@Composable
+private fun SessionSummaryScreen(program: ProgramDefinition, onDone: () -> Unit) {
+    BackHandler(onBack = onDone)
+
+    val workSteps = program.steps.filter { it.kind == StepKind.WORK }
+    val grips = workSteps.mapNotNull(::gripHandLabel).distinct()
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Session complete", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 24.dp))
+        Text(
+            program.title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(top = 4.dp, bottom = 24.dp),
+        )
+
+        SummaryStatRow("Reps completed", "${workSteps.size}")
+        SummaryStatRow("Time", formatSessionDuration(program.steps.sumOf { it.durationSeconds }))
+
+        if (grips.isNotEmpty()) {
+            Text(
+                "Grips trained",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(top = 20.dp, bottom = 4.dp),
+            )
+            grips.forEach { grip ->
+                Text(grip, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(vertical = 2.dp))
+            }
+        }
+
+        Button(onClick = onDone, modifier = Modifier.fillMaxWidth().padding(top = 32.dp)) { Text("Done") }
+    }
+}
+
+@Composable
+private fun SummaryStatRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    }
+}
+
+private fun formatSessionDuration(totalSeconds: Int): String {
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return if (minutes > 0) "${minutes}m ${seconds}s" else "${seconds}s"
 }

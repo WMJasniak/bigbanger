@@ -52,15 +52,17 @@ sealed interface RunnerPhase {
  * and driven by the caller's CoroutineScope (cancelled when it leaves
  * composition), matching the house style (see Morse's Repo/MorsePlayer).
  *
- * Measurement is started exactly once, in [start], and stopped only in [cancel] or on
- * natural completion -- so the live force trace keeps plotting continuously through
- * every WORK/REST/PREP step, instead of going blank between holds. [onSetMeasuring]
- * must not be called again mid-run for an ordinary step transition: on the real scale
- * it re-sends the BLE start-measurement command, which resets the device's own clock
- * and wipes the sample history, breaking the rolling chart's continuity right at that
- * transition -- restarting measurement is only ever correct at the very start of a run
- * (or after a real disconnect, in [resumeAfterReconnect], where the device's clock has
- * already reset on its own).
+ * Measurement is normally already running by the time [start] is called (the Ready
+ * gate starts it as soon as it connects, not when Start is pressed -- see
+ * ProgramRunnerScreen) and is stopped only in [cancel] or on natural completion -- so
+ * the live force trace keeps plotting continuously through every WORK/REST/PREP step,
+ * instead of going blank between holds. [onSetMeasuring] must not be called again
+ * mid-run for an ordinary step transition: on the real scale it re-sends the BLE
+ * start-measurement command, which resets the device's own clock and wipes the sample
+ * history, breaking the rolling chart's continuity right at that transition --
+ * restarting measurement is only ever correct at the very start of a run (or after a
+ * real disconnect, in [resumeAfterReconnect], where the device's clock has already
+ * reset on its own).
  *
  * A no-target WORK step (Max Testing) auto-records its own peak via
  * [onAttemptCompleted] and moves straight on -- no per-attempt decision pause -- scoped
@@ -71,6 +73,7 @@ class ProgramRunner(
     val program: ProgramDefinition,
     private val maxKgForStep: (ProgramStep) -> Float?,
     private val scope: CoroutineScope,
+    private val isMeasuring: () -> Boolean,
     private val onSetMeasuring: (Boolean) -> Unit,
     private val currentHistory: () -> List<WeightSample>,
     private val onAttemptCompleted: (ProgramStep, Float) -> Unit,
@@ -164,7 +167,13 @@ class ProgramRunner(
     }
 
     fun start() {
-        onSetMeasuring(true)
+        // The Ready gate (ProgramRunnerScreen) already starts measurement itself as
+        // soon as it's connected, well before Start is pressed, so the chart has real
+        // data to show from the very first frame instead of a gap while the device
+        // spins up. Only start it here if that somehow hasn't happened -- calling it
+        // again when already measuring would wipe the device's own clock, its sample
+        // history, and any tare already set on the Ready gate.
+        if (!isMeasuring()) onSetMeasuring(true)
         runStep()
     }
 

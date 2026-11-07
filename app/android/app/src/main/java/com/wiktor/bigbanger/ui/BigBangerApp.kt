@@ -2,7 +2,10 @@ package com.wiktor.bigbanger.ui
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -11,6 +14,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,7 +58,31 @@ fun BigBangerApp(viewModel: BigBangerViewModel, updateStatus: String?, onCheckUp
     }
 
     val bluetoothManager = remember { context.getSystemService(BluetoothManager::class.java) }
-    val adapterEnabled = bluetoothManager?.adapter?.isEnabled == true
+    // Turning Bluetooth on from outside the app (Quick Settings, system Settings, or
+    // the system "Allow Bigbanger to turn on Bluetooth?" dialog this screen's own
+    // button triggers) never recomposed this gate on its own -- isEnabled was read
+    // only once per composition, with nothing to trigger a new one, so the app stayed
+    // stuck on this screen until force-closed and reopened. A registered receiver for
+    // the adapter's own state-change broadcast keeps this current instead.
+    var adapterEnabled by remember { mutableStateOf(bluetoothManager?.adapter?.isEnabled == true) }
+    DisposableEffect(bluetoothManager) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context, intent: Intent) {
+                adapterEnabled = bluetoothManager?.adapter?.isEnabled == true
+            }
+        }
+        // ContextCompat (not Context.registerReceiver directly): targeting API 33+
+        // requires one of RECEIVER_EXPORTED/RECEIVER_NOT_EXPORTED or this throws at
+        // runtime on API 33+ devices -- ContextCompat handles that version split.
+        // NOT_EXPORTED is correct here: only the system ever sends this broadcast.
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        onDispose { context.unregisterReceiver(receiver) }
+    }
     if (!adapterEnabled) {
         PermissionScreen(
             message = "Bluetooth is turned off.",
